@@ -1,8 +1,8 @@
 name: b012_data
-description: A new Flutter project.
-version: 0.0.1
-homepage:
-repository:
+description: b012_data is a package that allow you to build, generate and manipulate data (sqlfite and disc files) very easily
+version: 0.0.2
+homepage: https://github.com/birane012
+repository: https://github.com/birane012/b012_data.git
 
 environment:
   sdk: ">=2.7.0 <3.0.0"

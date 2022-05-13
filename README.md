@@ -1,15 +1,17 @@
-# samaboutique
-projet personnel debuter 01_02_2020
+# b012_data is for data manipulations. It provide 
 
 ## NB: <br/>
-    Framework name: B012sqlfEasy
+    Package name: B012_data
     **Regles:**<br/>
     - Define a constructor with optional argument that holds every fied<br/>.
         Example: Business([this.idBusiness,this.nomBusiness,this.dateCreation,this.siege,this.isChoose])
+
     - field names of type date must containt the substring *date*. Nb: this substring is not cas sensitive<br/>
         Examples: dateCreation,creationDate,creationDATE,theDaTeOf
+
     - field names of type Uint8List must containt the substring *file*. Nb: this substring is not cas sensitive<br/>
         Examples: fileName,fileContent,imageFILE,profilFile
+
     - Add constraints using optionaly these 5 getter depending on what constraint you woud add:<br/>
         Example:<br/>
         CREATE TABLE Business (
@@ -28,14 +30,13 @@ projet personnel debuter 01_02_2020
         Map<String,String> get defaults => {'siege':'NULL'};
         Map<String,List<String>> get fKeys => {'siege':['Siege','idSiege']};
 
-        if a constraint is not need,you don't have to set its corresponding getter or simply make it return null<br/>
+        If a constraint is not need,you don't have to set its corresponding getter or simply make it return null<br/>
 
     - Always define a named constructor and an inatance method with the same name fromMap like below:<br/>
         Entite.fromMap(dynamic jsonOrMap) and <br/>
         Entite fromMap(dynamic jsonOrMap)=>Entite.fromMap(jsonOrMap)<br/>
+
     - Define the Map<String, dynamic> toMap() methode and make sure to assign an aproprate default value to each null ones
-
-
 
     ///////////////////////////////////////////////  ABOUT SQLITE  ////////////////////////////////////////////////////////
     - Important note from sqlite documentation:<br/>

@@ -1,24 +1,36 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:flutter/cupertino.dart';
 import 'package:path_provider/path_provider.dart';
+
 class DiscData {
   static final DiscData instance=DiscData._privateNamedConstructor();
-  DiscData._privateNamedConstructor(){appPath;}
-  String filesPath;
-  String databasesPath;
-  String rootPath;
+  DiscData._privateNamedConstructor();
+  String _rootPath;
+  String _databasesPath;
+  String _filesPath;
 
-  Future<String> get appPath async {
-    rootPath = (await getApplicationDocumentsDirectory()).path;
-    filesPath="${getParentDir(rootPath)}/files";
-    databasesPath="${getParentDir(rootPath)}/databases";
-    return rootPath;
+  Future<String> get rootPath async {
+    _rootPath??=(await getApplicationDocumentsDirectory()).path;
+    return _rootPath;
   }
 
-  ///If path (entire Lunix or windows path) is provide, fileName must be null<br/>
-  bool checkFileExists(String fileName,{String path})=>File(validatePath(path)??"$filesPath/$fileName").existsSync();
+  Future<String> get databasesPath async {
+    _databasesPath??=getParentDir((await getApplicationDocumentsDirectory()).path)+"/databases";
+    return _databasesPath;
+  }
+
+  Future<String> get filesPath async  {
+    _filesPath??=getParentDir((await getApplicationDocumentsDirectory()).path)+"/files";
+    return _filesPath;
+  }
+
+  Future<bool> checkFileExists(String fileName,{String path}) async {
+    return File(validatePath(path)??"${await filesPath}/$fileName").existsSync();
+  }
 
   ///get reduce url path by one directory.<br/>
   ///Exampe: <br/>
@@ -37,7 +49,7 @@ class DiscData {
   ///  If recursive is true, all non-existing parent paths are created first.<br/>
   ///  Throws a FileSystemException if the operation fails.<br/><br/>
   ///* returns the name of the file or  null if null or empty data was given
-  String saveDataToDisc(var data,DataType dataType,{String takeThisName,String path,bool recursive=false}) {
+  Future<String> saveDataToDisc(var data,DataType dataType,{String takeThisName,String path,bool recursive=false}) async{
     if(data!=null && data.isNotEmpty) {
       String fileName;
       if(path!=null)
@@ -45,7 +57,7 @@ class DiscData {
       else
         fileName=takeThisName??DateTime.now().toString();
 
-      File fileToSave = File(validatePath(path) ?? "$filesPath/$fileName");
+      File fileToSave = File(validatePath(path) ?? "${await filesPath}/$fileName");
       fileToSave.createSync(recursive: recursive);
 
       switch(dataType){
@@ -69,8 +81,8 @@ class DiscData {
   ///* If path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* If DataType (type of the data we want to save) equals DataType.text it will append the given string to the text file<br/>
   /// else it appends the data as bytes to the file<br/>
-  void appendDataToFile(var data,DataType dataType,String fileName,{String path}) {
-    File fileToSave = File(validatePath(path)??"$filesPath/$fileName");
+  Future<void> appendDataToFile(var data,DataType dataType,String fileName,{String path}) async{
+    File fileToSave = File(validatePath(path)??"${await filesPath}/$fileName");
     if(data!=null && data.isNotEmpty && fileToSave.existsSync()) {
       switch(dataType){
         case DataType.text:
@@ -103,6 +115,7 @@ class DiscData {
         validPath.write(path.substring(0,len-2));
       else
         validPath.write(path);
+
       return validPath.toString().replaceAll("\\", "/").replaceAll("//", "/").replaceAll('\\\\', '/');
     }
 
@@ -111,17 +124,17 @@ class DiscData {
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* returns file as base64 string or null if file do not exists
-  String readFileAsBase64(String fileName,{String path}){
-    File file = File(validatePath(path)??"$filesPath/$fileName");
+  Future<String> readFileAsBase64(String fileName,{String path}) async{
+    File file = File(validatePath(path)??"${await filesPath}/$fileName");
     if(file.existsSync())
-      return base64Encode(File(validatePath(path)??"$filesPath/$fileName").readAsBytesSync());
+      return base64Encode(File(validatePath(path)??"${await filesPath}/$fileName").readAsBytesSync());
     return null;
   }
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* returns file as bytes (Uint8List) or null if file do not exists
-  Uint8List readFileAsBytes(String fileName,{String path}){
-    File file = File(validatePath(path)??"$filesPath/$fileName");
+  Future<Uint8List> readFileAsBytes(String fileName,{String path}) async{
+    File file = File(validatePath(path)??"${await filesPath}/$fileName");
     if(file.existsSync())
       return file.readAsBytesSync();
     return null;
@@ -129,8 +142,8 @@ class DiscData {
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* returns the text store in file or null if file do not exists
-  String readFileAsString(String fileName,{String path}){
-    File file = File(validatePath(path)??"$filesPath/$fileName");
+  Future<String> readFileAsString(String fileName,{String path}) async{
+    File file = File(validatePath(path)??"${await filesPath}/$fileName");
     if(file.existsSync())
       return file.readAsStringSync();
     return null;
@@ -138,18 +151,18 @@ class DiscData {
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null.<br/>
   ///* returns the file or null if file do not exists
-  File getFile(String fileName,{String path}){
-    File file = File(validatePath(path)??"$filesPath/$fileName");
+  Future<File> getFile(String fileName,{String path}) async{
+    File file = File(validatePath(path)??"${await filesPath}/$fileName");
     if(file.existsSync())
       return file;
     return null;
   }
 
   ///* returns the Image or null if image do not exist
-  Image getImageFromDisc(String imageName, {String path,BoxFit fit=BoxFit.fill}) {
+  Future<Image> getImageFromDisc(String imageName, {String path,BoxFit fit=BoxFit.fill}) async{
     if(imageName==null || imageName.isEmpty)
       return null;
-    return Image.memory(DiscData.instance.readFileAsBytes(imageName,path: path), fit: fit);
+    return Image.memory(await DiscData.instance.readFileAsBytes(imageName,path: path), fit: fit);
   }
 }
 

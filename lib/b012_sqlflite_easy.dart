@@ -1,174 +1,399 @@
 library b012_data;
 
 import 'dart:async';
-import 'dart:io';
-import 'dart:convert';
-import 'dart:typed_data';
-import 'package:flutter/cupertino.dart';
-import 'package:path_provider/path_provider.dart';
 
-class DiscData {
-  static final DiscData instance=DiscData._privateNamedConstructor();
-  DiscData._privateNamedConstructor();
-  String _rootPath;
-  String _databasesPath;
-  String _filesPath;
+import 'package:b012_data/b012_disc_data.dart';
+import 'package:sqflite/sqflite.dart';
 
-  Future<String> get rootPath async {
-    _rootPath??=(await getApplicationDocumentsDirectory()).path;
-    return _rootPath;
+class DataAccess {
+  static final DataAccess instance=DataAccess._privateNamedConstructor();
+  DataAccess._privateNamedConstructor();
+  static Database _db;
+
+  Future<Database> get db async {
+    _db??=await openDatabase(await DiscData.instance.readFileAsString(null,path: '${await DiscData.instance.databasesPath}/dbName')??'sqlf_easy.db',version: 1);
+    return _db;
   }
 
-  Future<String> get databasesPath async {
-    _databasesPath??=getParentDir((await getApplicationDocumentsDirectory()).path)+"/databases";
-    return _databasesPath;
+  /*Directory documentDirectory = await getApplicationDocumentsDirectory();
+      path = join(documentDirectory.path, "ersen.db");
+      resultat: path=/data/user/0/sn.prose.ersen.ersen/app_flutter/ersen.db
+    Or
+      String databasesPath = await getDatabasesPath();
+      path = join(databasesPath, "ersen.db")  donne le meme path que si on passe directement le nom de la base a la methode openDatabase
+      - resultat: path=/data/user/0/sn.prose.ersen.ersen/databases/ersen.db
+      - real path from Device manager:/data/data/sn.prose.ersen.ersen/databases/ersen.db
+      print("path======>$path");
+  */
+  Future<Database> openDB(String dbPath) async => await openDatabase(dbPath);
+
+  Future<void> dropDB(String dbPath) async => await deleteDatabase(dbPath);
+
+  ///Use for changing the default sqflite database (sqlf_easy.db) to a database of your preference<br/>
+  ///Or simply switch beetween your existing databases.<br/>
+  ///* if newDBName exists already it will be opened and becomes app's database util next change<br/>
+  ///* If not then it will be created and opened as app's database util next change<br/>
+  Future<void> changeDB(String newDBName) async {
+    if(newDBName!=null&& newDBName.isNotEmpty){
+      String newDBNameCorrectName=newDBName+=newDBName.endsWith('.db')?'':'.db';
+      String dbName=await DiscData.instance.saveDataToDisc(newDBNameCorrectName, DataType.text,path: "${await DiscData.instance.databasesPath}/dbName");
+      if(dbName!=null) {
+        await _db.close();
+        _db= await openDatabase(newDBNameCorrectName,version: 1);
+      }
+    }
   }
 
-  Future<String> get filesPath async  {
-    _filesPath??=getParentDir((await getApplicationDocumentsDirectory()).path)+"/files";
-    return _filesPath;
+  ///This methode allow to save an objet to your sqflite db<br/>
+  ///Exemple:<br/>
+  ///bool witness=await insertObjet(Person('Mr','developper'));<br/>
+  ///where Person is an existing entity.<br/>
+  ///It can return false in two situations:<br/>
+  ///1 . the object was null<br/>
+  ///2 . insertion not succed due to somme column change or missing
+  Future<bool> insertObjet(var object) async {
+    int witness=0;
+    if(object!=null){
+      Database database = await db;
+      await createTableIfNotExists(object);
+      await database.transaction((txn) async {
+        await txn.insert(object.runtimeType.toString(),object.toMap()).then((value){witness=value;}).catchError((_){});
+      });
+    }
+    return witness>0;
   }
 
-  Future<bool> checkFileExists(String fileName,{String path}) async {
-    return File(validatePath(path)??"${await filesPath}/$fileName").existsSync();
+  ///This methode allow to save an entity's objet list to your sqflite db<br/>
+  ///Exemple:<br/>
+  ///bool witness=await insertObjetList([Person('Mr','developper'),Person('Mme','developper')]);<br/>
+  ///where Person is an existing entity<br/>
+  ///It can return false in two situations:<br/>
+  ///1 . the objectlist was null or empty<br/>
+  ///2 . insertions not succed due to somme column change or missing
+  Future<bool> insertObjetList(List objectlist) async {
+    bool witness=false;
+    if(objectlist!=null && objectlist.isNotEmpty){
+      Database database = await db;
+      String table = objectlist[0].runtimeType.toString();
+      await createTableIfNotExists(objectlist[0]);
+      await database.transaction((txn) async {
+        for(var object in objectlist) {
+          if(object!=null){
+            await txn.insert(table,object.toMap()).then((value){witness=value>0;}).catchError((_){witness=false;});
+            if(!witness)
+              break;
+          }
+        }
+      });
+    }
+    return witness;
   }
 
-  ///get reduce url path by one directory.<br/>
-  ///Exampe: <br/>
-  /// if path = "/flutter/app/dir/test"<br/>
-  /// getParentDir(path) returns "/flutter/app/dir"
-  String getParentDir(String path)=>(path.split('/')..removeLast()).join('/');
+  ///For user login validate<br/><br/>
+  ///Example:<br/>
+  ///Account account=await DataAccess.instance.getLogin<Account>(Account(),'email',email,'passWord',passWord);<br/><br/>
+  ///Where email and passWord are the login information of the user that wants to log in
+  Future<T> getLogin<T>(var tableEntityInstance,String identifierColumnName,String identifierValue,String passWordColumnName,String passWordValue) async {
+    List<Map<String, Object>> res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT * FROM ${T.toString()} WHERE $identifierColumnName = '$identifierValue' and $passWordColumnName = '$passWordValue'");
+    });
 
-  ///Use for saving data to a specific path on disc<br/>
-  ///* If path is not provid data will be save in the application directory name files.<br/>
-  ///* If path (entire Lunix or windows path) is provide, fileName must be null<br/>
-  ///* If DataType (type of the data we want to save) equals DataType.text it will be saved as text file<br/>
-  /// else it is saved as binary file (e.g for image, audio,pdf,video etc.)<br/>
-  ///* About recursive:<br/>
-  ///  Calling saveDataToDisc on an existing file on given path or name might fail if there are restrictive permissions on the file<br/>
-  ///  If recursive is false, the default, the file is created only if all directories in its path already exist.<br/>
-  ///  If recursive is true, all non-existing parent paths are created first.<br/>
-  ///  Throws a FileSystemException if the operation fails.<br/><br/>
-  ///* returns the name of the file or  null if null or empty data was given
-  Future<String> saveDataToDisc(var data,DataType dataType,{String takeThisName,String path,bool recursive=false}) async{
-    if(data!=null && data.isNotEmpty) {
-      String fileName;
-      if(path!=null)
-        fileName=path.split("/").last;
+    if(res.isNotEmpty)
+      return tableEntityInstance.fromMap(res.first);
+    return null;
+  }
+
+  ///returns a specific objet of type T (T=one of your entities) or null if that object do not existe
+  Future<T> get<T>(var tableEntityInstance,String afterWhere) async {
+    List<Map<String, Object>> res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT * FROM ${T.toString()} WHERE $afterWhere");
+    });
+
+    if(res.isNotEmpty)
+      return tableEntityInstance.fromMap(res.first);
+    return null;
+  }
+
+  //returns a specific objet of type T (T=one of your entities) or null if that object do not existe
+  /*Future<T> getObject<T>(String afterWhere) async {
+    var res;
+    var database = await this.db;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT * FROM ${T.toString()} WHERE $afterWhere");
+    });
+
+    if (res.length > 0)
+      return allClassMap[T.toString()].fromMap(res.first);
+
+    return null;
+  }*/
+
+  ///returns all objects of type T stored on db. (T=one of your entities) or null if there are no object of type T present on database
+  Future<List<T>> getAll<T>(var tableEntityInstance) async {
+    List<Map<String, Object>> res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.query(T.toString());
+    });
+
+    if(res.isNotEmpty)
+      return res.map((c) =>tableEntityInstance.fromMap(c) as T).toList();
+    return null;
+  }
+
+  ///returns all objects of type T that satify the afterWhere condition (T=one of your entities) or null if no object is find were stored in database
+  Future<List<T>> getAllSorted<T>(var tableEntityInstance,String afterWhere) async {
+    List<Map<String, Object>> res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT * FROM ${T.toString()} WHERE $afterWhere");
+    });
+
+    if(res.isNotEmpty)
+      return res.map((c) => tableEntityInstance.fromMap(c) as T).toList();
+    return null;
+  }
+
+  ///Returns a column of type (C)  from an entity of type (T)<br/><br/>
+  ///Example1 : <br/>
+  ///List<String> firstNames=await DataAccess.instance.getAColumnFrom<String,Personne>("firstName");<br/><br/>
+  ///Example2 : <br/>
+  ///List<Uint8List> fileContent=await DataAccess.instance.getAColumnFrom<Uint8List,Fichier>("content",afterWhere: "idEntity='1'  LIMIT 1")
+  Future<List<C>> getAColumnFrom<C,T>(String columnName,{String afterWhere}) async {
+    List<C> dataList=[];
+    await getSommeColumnsFrom<T>(columnName,afterWhere: afterWhere).then((resultat) {
+      dataList=resultat.map((line) => line[columnName] as C).toList();
+    }).catchError((_){});
+    return dataList;
+  }
+
+  ///Can return any query result as List<Map<String, Object>> where every map is row from the selected table<br/>
+  ///Exemple:<br/>
+  ///getSommeColumnsFrom("prenom, nom","Personne","usertype","fourniseur");
+  Future<List<Map<String, Object>>> getSommeColumnsFrom<T>(String listDesColonne, {String afterWhere}) async {
+    List<Map<String, Object>> res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT $listDesColonne FROM ${T.toString()} ${afterWhere!=null? 'WHERE $afterWhere':''}");
+    });
+    return res;
+  }
+
+  ///create an entity table if not exists.
+  Future<void> createTableIfNotExists(var entity)  async {
+    if(!await checkIfTableExists(entity.runtimeType.toString())){
+      Database database = await db;
+      await database.transaction((txn) async{txn.execute(showCreateTable(entity));});
+    }
+  }
+
+  ///returns the create table statement of the given object.
+  String showCreateTable(var entity) {
+    String pKey;
+    List<String> notNulls;
+    List<String> uniques;
+    Map<String,String> checks;
+    Map<String,String> defaults;
+    Map<String,List<String>> fKeys;
+
+    try {pKey=entity.pKey;} catch(e){pKey=null;}
+    try {notNulls=entity.notNulls;} catch(e){notNulls=null;}
+    try {uniques=entity.uniques;} catch(e){uniques=null;}
+    try {checks=entity.checks;} catch(e){checks=null;}
+    try {defaults=entity.defaults;} catch(e){defaults=null;}
+    try {fKeys=entity.fKeys;} catch(e){fKeys=null;}
+
+    StringBuffer createTableStatement = StringBuffer();
+    createTableStatement.write('CREATE TABLE ${entity.runtimeType.toString()} (\n');
+    Map<String, dynamic> objetToMap=entity.toMap();
+    String objectLastFieldName = objetToMap.keys.last;
+    bool haveForeignKey = fKeys!=null;
+    objetToMap.forEach((columnName,columnValue) {
+      /*dart primitive types: int,double,String,bool,Uint8List*/
+      switch(columnValue.runtimeType.toString()){
+        case 'String':
+          String columnNameLowerCase = columnName.toLowerCase();
+          createTableStatement.write(writeTableColumn(columnName,columnNameLowerCase.contains('date')? 'DATETIME':columnNameLowerCase.contains('file')? 'BLOB':'TEXT',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          break;
+        case 'int':
+          createTableStatement.write(writeTableColumn(columnName,'INTEGER',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          break;
+        case 'double':
+          createTableStatement.write(writeTableColumn(columnName,'REAL',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          break;
+        case 'bool':
+          checks ??= {};
+          checks[columnName]='$columnName in (0,1)';
+          createTableStatement.write(writeTableColumn(columnName,'INTEGER',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          break;
+        case 'Uint8List':
+          createTableStatement.write(writeTableColumn(columnName,'BLOB',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          break;
+      }
+    });
+
+    if(haveForeignKey){
+      String lastFKeyField = fKeys.keys.last;
+      fKeys.forEach((fkField, refEntityAndField) {
+        createTableStatement.write("FOREIGN KEY($fkField) REFERENCES ${refEntityAndField[0]}(${refEntityAndField[1]})${fkField!=lastFKeyField? ',\n':'\n)'}");
+      });
+    }
+    print("\n\n"+createTableStatement.toString());
+    return createTableStatement.toString();
+  }
+
+  ///returns a table column string base on getter that were define on your entities
+  String writeTableColumn(String columnName,String columnType,String pKey,List<String> notNulls,List<String> uniques,Map<String,String> checks,Map<String,String> defaults,String objectLastFieldName,bool haveForeignKey){
+    StringBuffer tableColumn = StringBuffer();
+    tableColumn.write("$columnName $columnType");
+
+    if(pKey!=null && pKey==columnName)
+      tableColumn.write(" PRIMARY KEY");
+
+    if(notNulls!=null && notNulls.contains(columnName))
+      tableColumn.write(" NOT NULL");
+
+    if(uniques!=null && uniques.contains(columnName))
+      tableColumn.write(" UNIQUE");
+
+    if(defaults!=null && defaults.containsKey(columnName))
+      tableColumn.write(" DEFAULT ${defaults[columnName]}");
+
+    if(checks!=null && checks.containsKey(columnName))
+      tableColumn.write(" CHECK(${checks[columnName]})");
+
+    tableColumn.write(columnName!=objectLastFieldName||haveForeignKey? ",\n":"\n)");
+    return tableColumn.toString();
+  }
+
+  ///check if table already exists.
+  Future<bool> checkIfTableExists(String table) async {
+    List<Map<String, Object>> res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='$table'");
+    });
+
+    if(res.isNotEmpty)
+      return true;
+
+    return false;
+  }
+
+  ///check if entity table already exists.
+  Future<bool> checkIfEntityTableExists<T>() async {
+    List<Map<String, Object>> res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='${T.toString()}'");
+    });
+
+    if(res.isNotEmpty)
+      return true;
+
+    return false;
+  }
+
+  Future<void> dropTable<T>() async {
+    Database database = await db;
+    await database.transaction((txn) async {
+      await txn.execute("DROP TABLE IF EXISTS ${T.toString()}");
+    });
+  }
+
+  Future<void> modifyATableStructure(String tableName, String createTableString) async {
+    Database database = await db;
+    await database.transaction((txn) async {
+      txn.execute("PRAGMA writable_schema = 1");
+      txn.execute("UPDATE sqlite_master SET SQL = '$createTableString' WHERE NAME = '$tableName'");
+      txn.execute("PRAGMA writable_schema = 0");
+    });
+  }
+
+  /*-----------------------------------For update-------------------------------------------------*/
+  ///Use for updating one or many fied or an entity (T) table<br/>
+  ///- The order or columns and their values must be respected<br/>
+  ///* Example:<br/>
+  ///    Using rawUpdate directely:<br/>
+  ///      int count = await database.rawUpdate('UPDATE Test SET salaire = ?, ismaried=?, year = ? WHERE name = ?',[9000000,true, 45, 'Alpha']);<br/>
+  ///    With updateSommeColumnsOf<T> method:<br/>
+  ///      bool response=await updateSommeColumnsOf<Personn>(['salaire','ismaried','year'],['name'],[1000,true, 45, 'Alpha'])<br/>
+  ///* whereMcop = whereMutliConditionOperation. This variable is use if there are many conditions to ckeck, its default value is ' and '.<br/>
+  ///Its values are in [['and','or','in','not in','exits','not exits']] etc.
+  Future<bool> updateSommeColumnsOf<T>(List<String> columnsToUpadate,List<String> whereColumns,List<Object> values,{String whereMcop="and"}) async {
+    StringBuffer columnsToUpadateString = StringBuffer();
+    for (String column in columnsToUpadate){
+      columnsToUpadateString.write(column!=columnsToUpadate.last? "$column = ?, ":"$column = ? ");
+    }
+
+    int temoin;
+    Database database = await db;
+    await database.transaction((txn) async {
+      temoin=await txn.rawUpdate('UPDATE ${T.toString()} SET ${columnsToUpadateString.toString()} WHERE ${getWhereString(whereColumns,whereMcop)}',values);
+    });
+    return temoin>0;
+  }
+
+  /// Update all fieds of an entity object except the primary key<br/>
+  ///- The order or columns and their values must be respected<br/>  ///- int response = await updateWholeObject(Person(18,'M2Sir'),[["name"]],[["Alpha"]])<br/>
+  ///* whereMcop = whereMutliConditionOperation. This variable is use if there are many conditions to ckeck, its default value is ' and '.<br/>
+  ///Its values are in ['and','or','in','not in','exits','not exits']
+  Future<bool> updateWholeObject(var newObject,List<String> whereColumns,List<Object> values,{String whereMcop="and"}) async {
+    Database database = await db;
+    int witness;
+    await database.transaction((txn) async {
+      witness= await txn.update(newObject.runtimeType.toString(), newObject.toMap(),where: getWhereString(whereColumns,whereMcop),whereArgs: values);
+    });
+    return witness>0;
+  }
+
+  ///returns an after where statement from a list of whereColumns and whereMcop (whereMutliConditionOperation)
+  String getWhereString(List<String> whereColumns,String whereMcop){
+    StringBuffer whereString = StringBuffer();
+    for (String whereColumn in whereColumns) {
+      if(whereColumn!=whereColumns.last)
+        whereString.write(whereColumn!=null? "$whereColumn = ? $whereMcop ": "$whereColumn is null $whereMcop");
       else
-        fileName=takeThisName??DateTime.now().toString();
-
-      File fileToSave = File(validatePath(path) ?? "${await filesPath}/$fileName");
-      fileToSave.createSync(recursive: recursive);
-
-      switch(dataType){
-        case DataType.text:
-          fileToSave.writeAsStringSync(data);
-          break;
-        case DataType.base64:
-        case DataType.bytes:
-          if(dataType==DataType.base64)
-            data = base64Decode(data);
-          fileToSave.writeAsBytesSync(data);
-          break;
-      }
-      return fileName;
+        whereString.write(whereColumn!=null? "$whereColumn = ? ": "$whereColumn is null");
     }
-    return null;
+    return whereString.toString();
   }
 
-  ///Use for app append data to a specific file on disc.<br/>
-  ///* If path is not provid it will seach the file in the application directory named files.<br/>
-  ///* If path (entire Lunix or windows path) is provide, fileName must be null<br/>
-  ///* If DataType (type of the data we want to save) equals DataType.text it will append the given string to the text file<br/>
-  /// else it appends the data as bytes to the file<br/>
-  Future<void> appendDataToFile(var data,DataType dataType,String fileName,{String path}) async{
-    File fileToSave = File(validatePath(path)??"${await filesPath}/$fileName");
-    if(data!=null && data.isNotEmpty && fileToSave.existsSync()) {
-      switch(dataType){
-        case DataType.text:
-          fileToSave.writeAsStringSync(data,mode: FileMode.append);
-          break;
-        case DataType.base64:
-        case DataType.bytes:
-          if(dataType==DataType.base64)
-            data = base64Decode(data);
-          fileToSave.writeAsBytesSync(data,mode: FileMode.append);
-          break;
-      }
-    }
+  ///Example:<br/>
+  ///bool witness=await deleteObjet<Test>([['email','passWord']],[['test@gmail.com','passer']])
+  Future<bool> delObjet<T>(List<String> whereColumns,List<Object> whereArgs,{String whereMcop="and"}) async {
+    int res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.delete(T.toString(), where: getWhereString(whereColumns,whereMcop), whereArgs: whereArgs);
+    });
+    return res>0;
   }
 
-  ///Check if the given path is correct.<br/>
-  ///If the path wasn't correct it will correct it and return a god one<br/>
-  ///* returns null if null or empty path was given
-  String validatePath(String path){
-    if(path!=null && path.isNotEmpty){
-      StringBuffer validPath=StringBuffer();
-      int len=path.length;
-
-      if(!path.startsWith('/')) {
-        validPath.write("/");
-        len++;
-      }
-
-      if(path.endsWith('/') || path.endsWith('\\'))
-        validPath.write(path.substring(0,len-2));
-      else
-        validPath.write(path);
-
-      return validPath.toString().replaceAll("\\", "/").replaceAll("//", "/").replaceAll('\\\\', '/');
-    }
-
-    return null;
+  ///delete and object(s) on database base on afterWhere<br/>
+  ///bool witness=await deleteObjet<Fichier>("id=1");
+  Future<bool> deleteObjet<T>(String afterWhere) async {
+    int res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.rawDelete("DELETE FROM ${T.toString()} WHERE $afterWhere");
+    });
+    return res>0;
   }
 
-  ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
-  ///* returns file as base64 string or null if file do not exists
-  Future<String> readFileAsBase64(String fileName,{String path}) async{
-    File file = File(validatePath(path)??"${await filesPath}/$fileName");
-    if(file.existsSync())
-      return base64Encode(File(validatePath(path)??"${await filesPath}/$fileName").readAsBytesSync());
-    return null;
+  /// Counts the number of elements of type T or depending to expression and afterWhere condition.<br/>
+  /// - expression = [['*' ou 'DISTINCT | ALL Expression']]<br/>
+  /// Example: expression ='distinct nom'
+  Future<int> countElementsOf<T>({String expression='*',String afterWhere}) async {
+    List<Map<String, Object>> res;
+    Database database = await db;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT count($expression) FROM ${T.toString()}${afterWhere!=null? " WHERE $afterWhere":""}");
+    });
+    return Sqflite.firstIntValue(res);
   }
-
-  ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
-  ///* returns file as bytes (Uint8List) or null if file do not exists
-  Future<Uint8List> readFileAsBytes(String fileName,{String path}) async{
-    File file = File(validatePath(path)??"${await filesPath}/$fileName");
-    if(file.existsSync())
-      return file.readAsBytesSync();
-    return null;
-  }
-
-  ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
-  ///* returns the text store in file or null if file do not exists
-  Future<String> readFileAsString(String fileName,{String path}) async{
-    File file = File(validatePath(path)??"${await filesPath}/$fileName");
-    if(file.existsSync())
-      return file.readAsStringSync();
-    return null;
-  }
-
-  ///if path (entire Lunix or windows path) is provide, fileName must be null.<br/>
-  ///* returns the file or null if file do not exists
-  Future<File> getFile(String fileName,{String path}) async{
-    File file = File(validatePath(path)??"${await filesPath}/$fileName");
-    if(file.existsSync())
-      return file;
-    return null;
-  }
-
-  ///* returns the Image or null if image do not exist
-  Future<Image> getImageFromDisc(String imageName, {String path,BoxFit fit=BoxFit.fill}) async{
-    if(imageName==null || imageName.isEmpty)
-      return null;
-    return Image.memory(await DiscData.instance.readFileAsBytes(imageName,path: path), fit: fit);
-  }
-}
-
-enum DataType{
-  text,
-  base64,
-  bytes
 }

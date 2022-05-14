@@ -1,6 +1,7 @@
 library b012_data;
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:b012_data/b012_disc_data.dart';
 import 'package:sqflite/sqflite.dart';
@@ -34,12 +35,12 @@ class DataAccess {
   ///* if newDBName exists already it will be opened and becomes app's database util next change<br/>
   ///* If not then it will be created and opened as app's database util next change<br/>
   Future<void> changeDB(String newDBName) async {
-    if(newDBName!=null&& newDBName.isNotEmpty){
+    if(newDBName!=null && newDBName.isNotEmpty){
       String newDBNameCorrectName=newDBName+=newDBName.endsWith('.db')?'':'.db';
       String dbName=await DiscData.instance.saveDataToDisc(newDBNameCorrectName, DataType.text,path: "${await DiscData.instance.databasesPath}/dbName");
       if(dbName!=null) {
         await _db.close();
-        _db= await openDatabase(newDBNameCorrectName,version: 1);
+        _db=await openDatabase(newDBNameCorrectName,version: 1);
       }
     }
   }
@@ -57,7 +58,7 @@ class DataAccess {
       Database database = await db;
       await createTableIfNotExists(object);
       await database.transaction((txn) async {
-        await txn.insert(object.runtimeType.toString(),object.toMap()).then((value){witness=value;}).catchError((_){});
+        await txn.insert(object.runtimeType.toString(),mapToUseForInsert(object.toMap())).then((value){witness=value;}).catchError((_){});
       });
     }
     return witness>0;
@@ -79,7 +80,7 @@ class DataAccess {
       await database.transaction((txn) async {
         for(var object in objectlist) {
           if(object!=null){
-            await txn.insert(table,object.toMap()).then((value){witness=value>0;}).catchError((_){witness=false;});
+            await txn.insert(table,mapToUseForInsert(object.toMap())).then((value){witness=value>0;}).catchError((_){witness=false;});
             if(!witness)
               break;
           }
@@ -87,6 +88,12 @@ class DataAccess {
       });
     }
     return witness;
+  }
+
+  Map<String,dynamic> mapToUseForInsert(Map<String,dynamic> objetToMap){
+    return objetToMap.map((key, value){
+      return value is ColumnType? MapEntry(key, null): MapEntry(key, value);
+    });;
   }
 
   ///For user login validate<br/><br/>
@@ -193,14 +200,14 @@ class DataAccess {
 
   ///returns the create table statement of the given object.
   String showCreateTable(var entity) {
-    String pKey;
+    MapEntry<String,bool> pKeyAuto;
     List<String> notNulls;
     List<String> uniques;
     Map<String,String> checks;
     Map<String,String> defaults;
     Map<String,List<String>> fKeys;
 
-    try {pKey=entity.pKey;} catch(e){pKey=null;}
+    try {pKeyAuto=entity.pKeyAuto;} catch(e){pKeyAuto=null;}
     try {notNulls=entity.notNulls;} catch(e){notNulls=null;}
     try {uniques=entity.uniques;} catch(e){uniques=null;}
     try {checks=entity.checks;} catch(e){checks=null;}
@@ -212,27 +219,43 @@ class DataAccess {
     Map<String, dynamic> objetToMap=entity.toMap();
     String objectLastFieldName = objetToMap.keys.last;
     bool haveForeignKey = fKeys!=null;
+    const List<String> primitiveTypes=<String>['String','int','double','bool','DateTime','Uint8List'];
+
+    String columnType;
+    String columnTypeIfNull;
     objetToMap.forEach((columnName,columnValue) {
-      /*dart primitive types: int,double,String,bool,Uint8List*/
-      switch(columnValue.runtimeType.toString()){
+      //columnTypeIfNull=columnValue.toString() OR a value of ['String','int','double','bool','DateTime','Uint8List']
+      // if columnValue was null. In that case columnValue is a value of type ColumnType then
+      // columnValue.toString().split('.').last will also return a value of ['String','int','double','bool','DateTime','Uint8List']
+      columnTypeIfNull = columnValue.toString().split('.').last;
+      if(primitiveTypes.contains(columnTypeIfNull))
+        columnType=columnTypeIfNull;
+      else
+        columnType=columnValue.runtimeType.toString();
+
+      switch(columnType){
         case 'String':
-          String columnNameLowerCase = columnName.toLowerCase();
-          createTableStatement.write(writeTableColumn(columnName,columnNameLowerCase.contains('date')? 'DATETIME':columnNameLowerCase.contains('file')? 'BLOB':'TEXT',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          createTableStatement.write(writeTableColumn(columnName,'TEXT',pKeyAuto,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
           break;
         case 'int':
-          createTableStatement.write(writeTableColumn(columnName,'INTEGER',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          createTableStatement.write(writeTableColumn(columnName,'INTEGER',pKeyAuto,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
           break;
         case 'double':
-          createTableStatement.write(writeTableColumn(columnName,'REAL',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          createTableStatement.write(writeTableColumn(columnName,'REAL',pKeyAuto,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
           break;
         case 'bool':
           checks ??= {};
           checks[columnName]='$columnName in (0,1)';
-          createTableStatement.write(writeTableColumn(columnName,'INTEGER',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          createTableStatement.write(writeTableColumn(columnName,'INTEGER',pKeyAuto,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          break;
+        case 'DateTime':
+          createTableStatement.write(writeTableColumn(columnName,'DATETIME',pKeyAuto,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
           break;
         case 'Uint8List':
-          createTableStatement.write(writeTableColumn(columnName,'BLOB',pKey,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
+          createTableStatement.write(writeTableColumn(columnName,'BLOB',pKeyAuto,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
           break;
+        default:
+          createTableStatement.write(writeTableColumn(columnName,'TEXT',pKeyAuto,notNulls,uniques,checks,defaults,objectLastFieldName,haveForeignKey));
       }
     });
 
@@ -247,12 +270,15 @@ class DataAccess {
   }
 
   ///returns a table column string base on getter that were define on your entities
-  String writeTableColumn(String columnName,String columnType,String pKey,List<String> notNulls,List<String> uniques,Map<String,String> checks,Map<String,String> defaults,String objectLastFieldName,bool haveForeignKey){
+  String writeTableColumn(String columnName,String columnType,MapEntry<String,bool> pKeyAuto,List<String> notNulls,List<String> uniques,Map<String,String> checks,Map<String,String> defaults,String objectLastFieldName,bool haveForeignKey){
     StringBuffer tableColumn = StringBuffer();
     tableColumn.write("$columnName $columnType");
 
-    if(pKey!=null && pKey==columnName)
+    if(pKeyAuto!=null && pKeyAuto.key==columnName) {
       tableColumn.write(" PRIMARY KEY");
+      if(pKeyAuto.value)
+        tableColumn.write(" AUTOINCREMENT");
+    }
 
     if(notNulls!=null && notNulls.contains(columnName))
       tableColumn.write(" NOT NULL");
@@ -389,6 +415,7 @@ class DataAccess {
   /// - expression = [['*' ou 'DISTINCT | ALL Expression']]<br/>
   /// Example: expression ='distinct nom'
   Future<int> countElementsOf<T>({String expression='*',String afterWhere}) async {
+    //for(int i in .range())
     List<Map<String, Object>> res;
     Database database = await db;
     await database.transaction((txn) async {
@@ -396,4 +423,42 @@ class DataAccess {
     });
     return Sqflite.firstIntValue(res);
   }
+}
+
+extension StringNumberExtension on String {
+  String get spacedNumbers=>this.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]} ');
+}
+
+///
+List<int> range(int lenOrStart,[int end]){
+  int tmp;
+  /* for(int i in Iterable.generate(10))
+      print("====>$i");*/
+  if(end!=null && end<lenOrStart){
+    tmp=end;
+    end=lenOrStart;
+    lenOrStart=tmp;
+  }
+  return end==null? List.generate(lenOrStart,(index) => index) : List.generate(end-lenOrStart, (index) => lenOrStart++);
+}
+
+
+///getter than returns a key of 32 random characters of numerics,majuscules and minuscules
+String get newKey{
+  Random rng = Random();
+  String numericsAndChars="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  StringBuffer key=StringBuffer();
+  for(int i=0;i<32;i++)
+    key.write(numericsAndChars[rng.nextInt(62)]);
+  return key.toString();
+}
+
+//
+enum ColumnType {
+  int,
+  double,
+  String,
+  bool,
+  DateTime,
+  Uint8List
 }

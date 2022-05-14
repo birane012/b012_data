@@ -63,13 +63,13 @@ class DiscData {
       switch(dataType){
         case DataType.text:
           fileToSave.writeAsStringSync(data);
-          break;
+        break;
         case DataType.base64:
         case DataType.bytes:
           if(dataType==DataType.base64)
             data = base64Decode(data);
           fileToSave.writeAsBytesSync(data);
-          break;
+        break;
       }
       return fileName;
     }
@@ -87,13 +87,13 @@ class DiscData {
       switch(dataType){
         case DataType.text:
           fileToSave.writeAsStringSync(data,mode: FileMode.append);
-          break;
+        break;
         case DataType.base64:
         case DataType.bytes:
           if(dataType==DataType.base64)
             data = base64Decode(data);
           fileToSave.writeAsBytesSync(data,mode: FileMode.append);
-          break;
+        break;
       }
     }
   }

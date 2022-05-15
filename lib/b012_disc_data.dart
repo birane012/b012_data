@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:b012_data/b012_sqlflite_easy.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -13,24 +14,11 @@ class DiscData {
   String _databasesPath;
   String _filesPath;
 
-  Future<String> get rootPath async {
-    _rootPath??=(await getApplicationDocumentsDirectory()).path;
-    return _rootPath;
-  }
+  Future<String> get rootPath async => _rootPath??(await getApplicationDocumentsDirectory()).path;
+  Future<String> get databasesPath async => _databasesPath??getParentDir((await getApplicationDocumentsDirectory()).path)+"/databases";
+  Future<String> get filesPath async => _filesPath??getParentDir((await getApplicationDocumentsDirectory()).path)+"/files";
 
-  Future<String> get databasesPath async {
-    _databasesPath??=getParentDir((await getApplicationDocumentsDirectory()).path)+"/databases";
-    return _databasesPath;
-  }
-
-  Future<String> get filesPath async  {
-    _filesPath??=getParentDir((await getApplicationDocumentsDirectory()).path)+"/files";
-    return _filesPath;
-  }
-
-  Future<bool> checkFileExists(String fileName,{String path}) async {
-    return File(validatePath(path)??"${await filesPath}/$fileName").existsSync();
-  }
+  Future<bool> checkFileExists(String fileName,{String path}) async => File(validatePath(path)??"${await filesPath}/$fileName").existsSync();
 
   ///get reduce url path by one directory.<br/>
   ///Exampe: <br/>
@@ -57,9 +45,8 @@ class DiscData {
       else
         fileName=takeThisName??DateTime.now().toString();
 
-      File fileToSave = File(validatePath(path) ?? "${await filesPath}/$fileName");
+      File fileToSave = File(validatePath(path)??"${await filesPath}/$fileName");
       fileToSave.createSync(recursive: recursive);
-
       switch(dataType){
         case DataType.text:
           fileToSave.writeAsStringSync(data);
@@ -115,7 +102,6 @@ class DiscData {
         validPath.write(path.substring(0,len-2));
       else
         validPath.write(path);
-
       return validPath.toString().replaceAll("\\", "/").replaceAll("//", "/").replaceAll('\\\\', '/');
     }
 
@@ -164,6 +150,18 @@ class DiscData {
       return null;
     return Image.memory(await DiscData.instance.readFileAsBytes(imageName,path: path), fit: fit);
   }
+
+  //It will take the url from T's table and get the file on path/fileName or the systePath/fileName
+  Future<D> getEntityFileOnDisc<D,T>(String urlColumnName,String key,dynamic value, {String path}) async{
+    var urls=await DataAccess.instance.getAColumnFrom<String,T>(urlColumnName,afterWhere: "$key='$value' LIMIT 1");
+    if(urls.isEmpty)
+      return null;
+    if(D==Uint8List)
+      return path!=null? await DiscData.instance.readFileAsBytes(null,path: path+"/"+urls[0]) as D: await DiscData.instance.readFileAsBytes(urls[0]) as D;
+    else
+      return path!=null? await DiscData.instance.readFileAsString(null,path: path+"/"+urls[0]) as D: await DiscData.instance.readFileAsString(urls[0]) as D;
+  }
+
 }
 
 enum DataType{

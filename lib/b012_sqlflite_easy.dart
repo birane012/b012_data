@@ -12,8 +12,7 @@ class DataAccess {
   static Database _db;
 
   Future<Database> get db async {
-    _db??=await openDatabase(await DiscData.instance.readFileAsString(null,path: '${await DiscData.instance.databasesPath}/dbName')??'sqlf_easy.db',version: 1);
-    return _db;
+    return _db??await openDatabase(await DiscData.instance.readFileAsString(null,path: '${await DiscData.instance.databasesPath}/dbName')??'sqlf_easy.db',version: 1);
   }
 
   /*Directory documentDirectory = await getApplicationDocumentsDirectory();
@@ -93,7 +92,7 @@ class DataAccess {
   Map<String,dynamic> mapToUseForInsert(Map<String,dynamic> objetToMap){
     return objetToMap.map((key, value){
       return value is ColumnType? MapEntry(key, null): MapEntry(key, value);
-    });;
+    });
   }
 
   ///For user login validate<br/><br/>
@@ -453,7 +452,6 @@ String get newKey{
   return key.toString();
 }
 
-//
 enum ColumnType {
   int,
   double,
@@ -462,3 +460,25 @@ enum ColumnType {
   DateTime,
   Uint8List
 }
+
+   //A faire pour rendre possible l'utlisation des booleen avec sqlite ameliorer le package
+/* us cas of boolean method in fromMap we shoud have:
+  Business.fromMap(dynamic jsonOrMap,{bool intToBool=true}){
+  idBusiness=jsonOrMap["idBusiness"];
+  nomBusiness=jsonOrMap["nomBusiness"];
+  dateCreation=jsonOrMap["dateCreation"];
+  siege=jsonOrMap["siege"];
+  isChoose=boolean(jsonOrMap["isChoose"],intToBool:intToBool);
+  }*/
+
+/*  us cas of mapToUseForInsert method we shoud have:
+  Map<String,dynamic> mapToUseForInsert(Map<String,dynamic> objetToMap){
+    return objetToMap.map((key, value){
+      if(value is ColumnType)
+        return MapEntry(key, null);
+      else if(value is bool)
+        return MapEntry(key,value?1:0);
+
+      return MapEntry(key, value);
+    });
+  }*/

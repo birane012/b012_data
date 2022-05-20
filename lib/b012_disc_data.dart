@@ -14,9 +14,20 @@ class DiscData {
   String _databasesPath;
   String _filesPath;
 
-  Future<String> get rootPath async => _rootPath??(await getApplicationDocumentsDirectory()).path;
-  Future<String> get databasesPath async => _databasesPath??getParentDir((await getApplicationDocumentsDirectory()).path)+"/databases";
-  Future<String> get filesPath async => _filesPath??getParentDir((await getApplicationDocumentsDirectory()).path)+"/files";
+  Future<String> get rootPath async {
+    _rootPath??=(await getApplicationDocumentsDirectory()).path;
+    return _rootPath;
+  }
+
+  Future<String> get databasesPath async {
+    _databasesPath??=getParentDir((await getApplicationDocumentsDirectory()).path)+"/databases";
+    return _databasesPath;
+  }
+
+  Future<String> get filesPath async  {
+    _filesPath??=getParentDir((await getApplicationDocumentsDirectory()).path)+"/files";
+    return _filesPath;
+  }
 
   Future<bool> checkFileExists(String fileName,{String path}) async => File(validatePath(path)??"${await filesPath}/$fileName").existsSync();
 
@@ -151,7 +162,8 @@ class DiscData {
     return Image.memory(await DiscData.instance.readFileAsBytes(imageName,path: path), fit: fit);
   }
 
-  //It will take the url from T's table and get the file on path/fileName or the systePath/fileName
+  ///It will take the url from T's table and get the file on path/fileName or the systePath/fileName<br/>
+  ///D is Unit8List or String
   Future<D> getEntityFileOnDisc<D,T>(String urlColumnName,String key,dynamic value, {String path}) async{
     var urls=await DataAccess.instance.getAColumnFrom<String,T>(urlColumnName,afterWhere: "$key='$value' LIMIT 1");
     if(urls.isEmpty)

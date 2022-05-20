@@ -12,7 +12,8 @@ class DataAccess {
   static Database _db;
 
   Future<Database> get db async {
-    return _db??await openDatabase(await DiscData.instance.readFileAsString(null,path: '${await DiscData.instance.databasesPath}/dbName')??'sqlf_easy.db',version: 1);
+    _db??=await openDatabase(await DiscData.instance.readFileAsString(null,path: '${await DiscData.instance.databasesPath}/dbName')??'sqlf_easy.db',version: 1);
+    return _db;
   }
 
   /*Directory documentDirectory = await getApplicationDocumentsDirectory();

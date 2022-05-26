@@ -16,7 +16,8 @@ class DataAccess {
     return _db;
   }
 
-  /*Directory documentDirectory = await getApplicationDocumentsDirectory();
+  /*
+      Directory documentDirectory = await getApplicationDocumentsDirectory();
       path = join(documentDirectory.path, "ersen.db");
       resultat: path=/data/user/0/sn.prose.ersen.ersen/app_flutter/ersen.db
     Or
@@ -90,9 +91,17 @@ class DataAccess {
     return witness;
   }
 
+  ///us cas of mapToUseForInsert method we shoud have:
   Map<String,dynamic> mapToUseForInsert(Map<String,dynamic> objetToMap){
     return objetToMap.map((key, value){
-      return value is ColumnType? MapEntry(key, null): MapEntry(key, value);
+      if(value is ColumnType)
+        return MapEntry(key, null);
+      else if(value is bool)
+        return MapEntry(key,value?1:0);
+      else if(value is DateTime)
+        return MapEntry(key,value.toString());
+
+      return MapEntry(key, value);
     });
   }
 
@@ -453,6 +462,8 @@ String get newKey{
   return key.toString();
 }
 
+///Dart's primitive types. User at the moment that the package create an entity's table on sqlite database.<br/>
+///It's use when never the corresponding the correspondinf field is null to determine the type of the column
 enum ColumnType {
   int,
   double,
@@ -462,24 +473,13 @@ enum ColumnType {
   Uint8List
 }
 
-   //A faire pour rendre possible l'utlisation des booleen avec sqlite ameliorer le package
-/* us cas of boolean method in fromMap we shoud have:
-  Business.fromMap(dynamic jsonOrMap,{bool intToBool=true}){
-  idBusiness=jsonOrMap["idBusiness"];
-  nomBusiness=jsonOrMap["nomBusiness"];
-  dateCreation=jsonOrMap["dateCreation"];
-  siege=jsonOrMap["siege"];
-  isChoose=boolean(jsonOrMap["isChoose"],intToBool:intToBool);
-  }*/
+////prend [(1 ou 0) ou (true ou false)] et return respectivement [(true ou false) ou (1 ou 0)]
+dynamic boolean(var intOrBool,{bool isInt=true}){
+  if(intOrBool!=null)
+    return isInt? intOrBool>0 : intOrBool;
+  return null;
+}
 
-/*  us cas of mapToUseForInsert method we shoud have:
-  Map<String,dynamic> mapToUseForInsert(Map<String,dynamic> objetToMap){
-    return objetToMap.map((key, value){
-      if(value is ColumnType)
-        return MapEntry(key, null);
-      else if(value is bool)
-        return MapEntry(key,value?1:0);
+///permet de convertir une date (String) issu de la base de donnees sqflite en DateTime
+DateTime dateTime(String dateString)=>dateString!=null?DateTime.parse(dateString):null;
 
-      return MapEntry(key, value);
-    });
-  }*/

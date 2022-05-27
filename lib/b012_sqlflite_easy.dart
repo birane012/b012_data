@@ -278,6 +278,27 @@ class DataAccess {
     return createTableStatement.toString();
   }
 
+  ///Allow us to get the list of column name's of an entity table store in sqlite.<br/>
+  ///It is us to controlle if new column was added or deleted and ALTER the<br/>
+  ///corresponding entiity table for adding or deleting that column.
+  Future<List<String>> getEntityColumnsName<T>() async {
+    Database database = await db;
+    List<Map<String, Object>> res;
+    List<String> columnName;
+    await database.transaction((txn) async {
+      res = await txn.rawQuery("SELECT SQL FROM sqlite_master WHERE type='table' AND name='${T.toString()}'");
+      if(res.isNotEmpty) {
+        String tableSQL=res.first['sql'];
+        List<String> columnLine= tableSQL.split('\n');
+        columnLine=columnLine.sublist(1,columnLine.length-1);
+        columnName=[];
+        for(String colName in columnLine)
+          columnName.add(colName.split(' ')[0]);
+      }
+    });
+    return columnName;
+  }
+
   ///returns a table column string base on getter that were define on your entities
   String writeTableColumn(String columnName,String columnType,MapEntry<String,bool> pKeyAuto,List<String> notNulls,List<String> uniques,Map<String,String> checks,Map<String,String> defaults,String objectLastFieldName,bool haveForeignKey){
     StringBuffer tableColumn = StringBuffer();

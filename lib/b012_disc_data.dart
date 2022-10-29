@@ -20,16 +20,21 @@ class DiscData {
   }
 
   Future<String> get databasesPath async {
-    _databasesPath ??= getParentDir((await getApplicationDocumentsDirectory()).path) + "/databases";
+    _databasesPath ??=
+        getParentDir((await getApplicationDocumentsDirectory()).path) +
+            "/databases";
     return _databasesPath;
   }
 
   Future<String> get filesPath async {
-    _filesPath ??= getParentDir((await getApplicationDocumentsDirectory()).path) + "/files";
+    _filesPath ??=
+        getParentDir((await getApplicationDocumentsDirectory()).path) +
+            "/files";
     return _filesPath;
   }
 
-  Future<bool> checkFileExists(String fileName, {String path}) async => File(validatePath(path) ?? "${await filesPath}/$fileName").existsSync();
+  Future<bool> checkFileExists(String fileName, {String path}) async =>
+      File(validatePath(path) ?? "${await filesPath}/$fileName").existsSync();
 
   ///get reduce url path by one directory.<br/>
   ///Exampe: <br/>
@@ -48,7 +53,8 @@ class DiscData {
   ///  If recursive is true, all non-existing parent paths are created first.<br/>
   ///  Throws a FileSystemException if the operation fails.<br/><br/>
   ///* returns the name of the file or  null if null or empty data was given
-  Future<String> saveDataToDisc(var data, DataType dataType, {String takeThisName, String path, bool recursive = false}) async {
+  Future<String> saveDataToDisc(var data, DataType dataType,
+      {String takeThisName, String path, bool recursive = false}) async {
     if (data != null && data.isNotEmpty) {
       String fileName;
       if (path != null)
@@ -56,7 +62,8 @@ class DiscData {
       else
         fileName = takeThisName ?? DateTime.now().toString();
 
-      File fileToSave = File(validatePath(path) ?? "${await filesPath}/$fileName");
+      File fileToSave =
+          File(validatePath(path) ?? "${await filesPath}/$fileName");
       fileToSave.createSync(recursive: recursive);
       switch (dataType) {
         case DataType.text:
@@ -78,8 +85,10 @@ class DiscData {
   ///* If path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* If DataType (type of the data we want to save) equals DataType.text it will append the given string to the text file<br/>
   /// else it appends the data as bytes to the file<br/>
-  Future<void> appendDataToFile(var data, DataType dataType, String fileName, {String path}) async {
-    File fileToSave = File(validatePath(path) ?? "${await filesPath}/$fileName");
+  Future<void> appendDataToFile(var data, DataType dataType, String fileName,
+      {String path}) async {
+    File fileToSave =
+        File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (data != null && data.isNotEmpty && fileToSave.existsSync()) {
       switch (dataType) {
         case DataType.text:
@@ -126,7 +135,9 @@ class DiscData {
   Future<String> readFileAsBase64(String fileName, {String path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (file.existsSync())
-      return base64Encode(File(validatePath(path) ?? "${await filesPath}/$fileName").readAsBytesSync());
+      return base64Encode(
+          File(validatePath(path) ?? "${await filesPath}/$fileName")
+              .readAsBytesSync());
     return null;
   }
 
@@ -155,22 +166,33 @@ class DiscData {
   }
 
   ///* returns the Image or null if image do not exist
-  Future<Image> getImageFromDisc(String imageName, {String path, BoxFit fit = BoxFit.fill}) async {
+  Future<Image> getImageFromDisc(String imageName,
+      {String path, BoxFit fit = BoxFit.fill}) async {
     if (imageName == null || imageName.isEmpty) return null;
-    return Image.memory(await DiscData.instance.readFileAsBytes(imageName, path: path), fit: fit);
+    return Image.memory(
+        await DiscData.instance.readFileAsBytes(imageName, path: path),
+        fit: fit);
   }
 
   ///It will take the url from T's table and get the file on path/fileName or the systePath/fileName<br/>
   ///D is Unit8List or String
-  Future<D> getEntityFileOnDisc<D, T>(String urlColumnName, String key, dynamic value, {String path}) async {
+  Future<D> getEntityFileOnDisc<D, T>(
+      String urlColumnName, String key, dynamic value,
+      {String path}) async {
     var urls = await DataAccess.instance.getAColumnFrom<String, T>(
         urlColumnName,
         afterWhere: "$key='$value' LIMIT 1");
     if (urls.isEmpty) return null;
     if (D == Uint8List)
-      return path != null ? await DiscData.instance.readFileAsBytes(null, path: path + "/" + urls[0]) as D : await DiscData.instance.readFileAsBytes(urls[0]) as D;
+      return path != null
+          ? await DiscData.instance
+              .readFileAsBytes(null, path: path + "/" + urls[0]) as D
+          : await DiscData.instance.readFileAsBytes(urls[0]) as D;
     else
-      return path != null ? await DiscData.instance.readFileAsString(null, path: path + "/" + urls[0]) as D : await DiscData.instance.readFileAsString(urls[0]) as D;
+      return path != null
+          ? await DiscData.instance
+              .readFileAsString(null, path: path + "/" + urls[0]) as D
+          : await DiscData.instance.readFileAsString(urls[0]) as D;
   }
 }
 

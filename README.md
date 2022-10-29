@@ -1,11 +1,11 @@
-# b012_data is for data manipulations. It provide bean persistance on SQLite database and system file manipulation. 
+# b012_data is for data manipulations.<br/>
+# It provide bean persistance on SQLite database and system file manipulation.
 
-## NB: <br/>
     import 'package:b012_data/b012_disc_data.dart';
     import 'package:flutter/material.dart';
     import 'package:b012_data/b012_sqlflite_easy.dart';
     
-    //L'entité Person
+    //Person entity
     class Person {
     String idPers;
     String firstName;

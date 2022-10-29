@@ -1,6 +1,6 @@
 name: b012_data
 description: b012_data is a package that allow you to build, generate and manipulate data (sqlfite and disc files) very easily
-version: 0.0.3
+version: 0.0.5
 homepage: https://github.com/birane012
 repository: https://github.com/birane012/b012_data.git
 

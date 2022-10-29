@@ -1,72 +1,126 @@
-# b012_data is for data manipulations. It provide 
+# b012_data is for data manipulations. It provide bean persistance on SQLite database and system file manipulation. 
 
 ## NB: <br/>
-    Package name: B012_data
-    **Regles:**<br/>
-    - Define a constructor with optional argument that holds every fied<br/>.
-        Example: Business([this.idBusiness,this.nomBusiness,this.dateCreation,this.siege,this.isChoose])
+    import 'package:b012_data/b012_disc_data.dart';
+    import 'package:flutter/material.dart';
+    import 'package:b012_data/b012_sqlflite_easy.dart';
+    
+    //L'entité Person
+    class Person {
+    String idPers;
+    String firstName;
+    String lastName;
+    bool sex;
+    DateTime dateOfBirth;
+    
+    //Step 1:
+    MapEntry<String,bool> get pKeyAuto => const MapEntry('idPers', false);
+    List<String> get notNulls => <String>['firstName','lastName','sex','dateOfBirth'];
+    
+    //Step 2:
+    Person([this.idPers, this.firstName, this.lastName, this.sex, this.dateOfBirth]);
+    
+    //Step 3:
+    Map<String,dynamic> toMap() => {
+    "idPers": idPers??ColumnType.String,
+    "firstName": firstName??ColumnType.String,
+    "lastName": lastName??ColumnType.String,
+    "sex": sex??ColumnType.bool,
+    "dateOfBirth": dateOfBirth??ColumnType.DateTime,
+    };
+    
+    //Step 4:
+    Person.fromMap(dynamic jsonOrMap,{bool isInt=true}){
+    idPers=jsonOrMap["idPers"];
+    firstName=jsonOrMap["firstName"];
+    lastName=jsonOrMap["lastName"];
+    sex=boolean(jsonOrMap["sex"],isInt: isInt);
+    dateOfBirth=dateTime(jsonOrMap["dateOfBirth"]);
+    }
+    
+    //Step 5:
+    Person fromMap(dynamic jsonOrMap)=>Person.fromMap(jsonOrMap);
+    }
+    
+    //////////////////////////////////Exemple of use://////////////////////////////////
+    
+    Future<void> main() async{
+    WidgetsFlutterBinding.ensureInitialized();
+    
+    ///////////DataAccess.instance/////////////
 
-    - field names of type date must containt the substring *date*. Nb: this substring is not cas sensitive<br/>
-        Examples: dateCreation,creationDate,creationDATE,theDaTeOf
+    //Show create table query of Person entity
+    DataAccess.instance.showCreateTable(Person());
+    
+    //Check if the Person table exists in the database
+    bool witnessPersTableExiste= await DataAccess.instance.checkIfEntityTableExists<Person>();
+    
+    //Insert a new person in Person table
+    bool tInsert=await DataAccess.instance.insertObjet(Person(newKey,'KEBE','Birane',true,DateTime(1994,03,01)));
+    
+    //Insert a list of persons in Person table
+    bool tInsertList=await DataAccess.instance.insertObjet(
+    <Person>[Person(newKey,'Mbaye','Aliou',true,DateTime(1999,05,01)),Person(newKey,'Cisse','Fatou',false,DateTime(2000,07,09))]
+    );
+    
+    //Find a person
+    Person birane=await DataAccess.instance.get<Person>(Person(),"firstName='Birane' and lastName='KEBE'");
+    
+    //Fing find all persons in Person table
+    List<Person> Persons=await DataAccess.instance.getAll<Person>(Person());
+    
+    //Find men in Person table
+    List<Person> hommes=await DataAccess.instance.getAllSorted<Person>(Person(),'sex=1');
+    
+    //Collect all first names
+    List<String> firstNames=await DataAccess.instance.getAColumnFrom<String,Person>('firstName');
+    
+    //Collect all first names of female persons
+    List<String> firstNamesFemmes=await DataAccess.instance.getAColumnFrom<String,Person>('firstName',afterWhere: "sex=0");
+    
+    //Collect all first and last names of Persons
+    List<Map<String, Object>> firstNamesAndlastNames= await DataAccess.instance.getSommeColumnsFrom<Person>("firstName,lastName");
+    
+    //Collect all first and last names of female persons
+    List<Map<String, Object>> firstNamesAndlastNamesFemmes= await DataAccess.instance.getSommeColumnsFrom<Person>("firstName,lastName",afterWhere: "sex=0");
+    
+    //Change Birane's first name to developer and last name KEBE in 2022
+    bool witnessUpdatelastNameEtfirstName= await DataAccess.instance.updateSommeColumnsOf<Person>(['firstName','lastName'],['firstName','lastName'],['developper','2022','Birane','KEBE']);
+    
+    //delete a Person with firstName Fatou
+    bool witnessDelFatou= await DataAccess.instance.deleteObjet<Person>("firstName='Fatou'");
+    
+    //Count the lastNumber of Persons
+    int nbPerson= await DataAccess.instance.countElementsOf<Person>();
+    
+    //Counts the lastNumber of Male Person
+    int nbMen= await DataAccess.instance.countElementsOf<Person>(afterWhere: 'sex=1');
 
-    - field names of type Uint8List must containt the substring *file*. Nb: this substring is not cas sensitive<br/>
-        Examples: fileName,fileContent,imageFILE,profilFile
 
-    - Add constraints using optionaly these 5 getter depending on what constraint you woud add:<br/>
-        Example:<br/>
-        CREATE TABLE Business (
-          idBusiness text PRIMARY KEY,
-          nomBusiness text NOT NULL,
-          dateCreation Datetime NOT NULL,
-          siege text DEFAULT NULL,
-          isChoose INTEGER NOT NULL CHECK(isChoose IN (0,1))
-        )
-        is geneate as follow:<br/>
+     ///////////DataAccess.instance/////////////
 
-        String get pKey => "idBusiness";
-        List<String> get notNulls => <String>['nomBusiness','dateCreation','isChoose'];
-        List<String> get uniques => null;
-        Map<String,String> get checks => {'isChoose':'isChoose in (0,1)'};
-        Map<String,String> get defaults => {'siege':'NULL'};
-        Map<String,List<String>> get fKeys => {'siege':['Siege','idSiege']};
+    //databases path
+    String databases=await DiscData.instance.databasesPath;
+    
+    //files path
+    String files=await DiscData.instance.filesPath;
+    
+    //files path
+    String appFlutter=await DiscData.instance.rootPath;
+    
+    //Save text data to disc on files directory
+    String fileName=await DiscData.instance.saveDataToDisc('contenu du fichier test.txt', DataType.text,takeThisName: 'test.txt');
+    
+    //Check if test.txt file exists
+    bool witnessTestFileExiste=await DiscData.instance.checkFileExists('test.txt');
+    
+    //Read the contents of the test.txt file
+    String readTest=await DiscData.instance.readFileAsString('test.txt');
 
-        If a constraint is not need,you don't have to set its corresponding getter or simply make it return null<br/>
+    //A top level function that dumps all data from database tables.
+     await cleanAllTablesData();
+    
+    runApp(Container());
+    }
 
-    - Always define a named constructor and an inatance method with the same name fromMap like below:<br/>
-        Entite.fromMap(dynamic jsonOrMap) and <br/>
-        Entite fromMap(dynamic jsonOrMap)=>Entite.fromMap(jsonOrMap)<br/>
 
-    - Define the Map<String, dynamic> toMap() methode and make sure to assign an aproprate default value to each null ones
-
-    ///////////////////////////////////////////////  ABOUT SQLITE  ////////////////////////////////////////////////////////
-    - Important note from sqlite documentation:<br/>
-        Supported SQLite types<br/>
-        No validity check is done on values yet so please avoid non supported types https://www.sqlite.org/datatype3.html<br/>
-        DateTime is not a supported SQLite type. Personally I store them as int (millisSinceEpoch) or string (iso8601).<br/> 
-        SQLite TIMESTAMP type sometimes requires using date functions. TIMESTAMP values are read as String that the application needs to parse.<br/>
-        
-        bool is not a supported SQLite type. Use INTEGER and 0 and 1 values.
-
-        Whwen tying to save data type bool, it fails and the below message appears
-        *** WARNING ***
-        I/flutter (26142): Invalid argument true with type bool.
-        I/flutter (26142): Only num, String and Uint8List are supported. See https://github.com/tekartik/sqflite/blob/master/sqflite/doc/supported_types.md for details
-        I/flutter (26142): This will throw an exception in the future. For now it is displayed once per type.
-
-        
-        INTEGER
-        * SQLite type: INTEGER
-        * Dart type: int
-        * Supported values: from -2^63 to 2^63 - 1
-        
-        REAL
-        * SQLite type: REAL
-        * Dart type: num
-        
-        TEXT
-        * SQLite type: TEXT
-        * Dart type: String
-        
-        BLOB
-        * SQLite typ: BLOB
-        * Dart type: Uint8List

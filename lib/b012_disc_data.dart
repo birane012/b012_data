@@ -175,7 +175,7 @@ class DiscData {
   }
 
   ///It will take the url from T's table and get the file on path/fileName or the systePath/fileName<br/>
-  ///D is Unit8List or String
+  ///D is the type of the loaded data (Unit8List, String, integer, etc)
   Future<D> getEntityFileOnDisc<D, T>(
       String urlColumnName, String key, dynamic value,
       {String path}) async {
@@ -183,6 +183,7 @@ class DiscData {
         urlColumnName,
         afterWhere: "$key='$value' LIMIT 1");
     if (urls.isEmpty) return null;
+
     if (D == Uint8List)
       return path != null
           ? await DiscData.instance

@@ -341,7 +341,7 @@ class DataAccess {
 
       switch (columnType) {
         case 'String':
-          createTableStatement.write(writeTableColumn(
+          createTableStatement.write(_writeTableColumn(
               columnName,
               'TEXT',
               pKeyAuto,
@@ -353,7 +353,7 @@ class DataAccess {
               haveForeignKey));
           break;
         case 'int':
-          createTableStatement.write(writeTableColumn(
+          createTableStatement.write(_writeTableColumn(
               columnName,
               'INTEGER',
               pKeyAuto,
@@ -365,7 +365,7 @@ class DataAccess {
               haveForeignKey));
           break;
         case 'double':
-          createTableStatement.write(writeTableColumn(
+          createTableStatement.write(_writeTableColumn(
               columnName,
               'REAL',
               pKeyAuto,
@@ -379,7 +379,7 @@ class DataAccess {
         case 'bool':
           checks ??= {};
           checks[columnName] = '$columnName in (0,1)';
-          createTableStatement.write(writeTableColumn(
+          createTableStatement.write(_writeTableColumn(
               columnName,
               'INTEGER',
               pKeyAuto,
@@ -391,7 +391,7 @@ class DataAccess {
               haveForeignKey));
           break;
         case 'DateTime':
-          createTableStatement.write(writeTableColumn(
+          createTableStatement.write(_writeTableColumn(
               columnName,
               'DATETIME',
               pKeyAuto,
@@ -403,7 +403,7 @@ class DataAccess {
               haveForeignKey));
           break;
         case 'Uint8List':
-          createTableStatement.write(writeTableColumn(
+          createTableStatement.write(_writeTableColumn(
               columnName,
               'BLOB',
               pKeyAuto,
@@ -415,7 +415,7 @@ class DataAccess {
               haveForeignKey));
           break;
         default:
-          createTableStatement.write(writeTableColumn(
+          createTableStatement.write(_writeTableColumn(
               columnName,
               'TEXT',
               pKeyAuto,
@@ -462,7 +462,7 @@ class DataAccess {
   }
 
   ///returns a table column string base on getter that were define on your entities
-  String writeTableColumn(
+  String _writeTableColumn(
       String columnName,
       String columnType,
       MapEntry<String, bool> pKeyAuto,
@@ -565,7 +565,7 @@ class DataAccess {
     Database database = await db;
     await database.transaction((txn) async {
       temoin = await txn.rawUpdate(
-          'UPDATE ${T.toString()} SET ${columnsToUpadateString.toString()} WHERE ${getWhereString(whereColumns, whereMcop)}',
+          'UPDATE ${T.toString()} SET ${columnsToUpadateString.toString()} WHERE ${_getWhereString(whereColumns, whereMcop)}',
           values);
     });
     return temoin > 0;
@@ -583,13 +583,13 @@ class DataAccess {
     await database.transaction((txn) async {
       witness = await txn.update(
           newObject.runtimeType.toString(), newObject.toMap(),
-          where: getWhereString(whereColumns, whereMcop), whereArgs: values);
+          where: _getWhereString(whereColumns, whereMcop), whereArgs: values);
     });
     return witness > 0;
   }
 
   ///returns an after where statement from a list of whereColumns and whereMcop (whereMutliConditionOperation)
-  String getWhereString(List<String> whereColumns, String whereMcop) {
+  String _getWhereString(List<String> whereColumns, String whereMcop) {
     StringBuffer whereString = StringBuffer();
     for (String whereColumn in whereColumns) {
       if (whereColumn != whereColumns.last)
@@ -611,7 +611,7 @@ class DataAccess {
     Database database = await db;
     await database.transaction((txn) async {
       res = await txn.delete(T.toString(),
-          where: getWhereString(whereColumns, whereMcop), whereArgs: whereArgs);
+          where: _getWhereString(whereColumns, whereMcop), whereArgs: whereArgs);
     });
     return res > 0;
   }

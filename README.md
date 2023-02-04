@@ -72,31 +72,31 @@
     //Find a person
     Person birane=await DataAccess.instance.get<Person>(Person(),"firstName='Birane' and lastName='KEBE'");
     
-    //Fing find all persons in Person table
+    //Find all persons in Person table
     List<Person> Persons=await DataAccess.instance.getAll<Person>(Person());
     
     //Find men in Person table
-    List<Person> hommes=await DataAccess.instance.getAllSorted<Person>(Person(),'sex=1');
+    List<Person> men=await DataAccess.instance.getAllSorted<Person>(Person(),'sex=1');
     
     //Collect all first names
     List<String> firstNames=await DataAccess.instance.getAColumnFrom<String,Person>('firstName');
     
     //Collect all first names of female persons
-    List<String> firstNamesFemmes=await DataAccess.instance.getAColumnFrom<String,Person>('firstName',afterWhere: "sex=0");
+    List<String> womensfirstName=await DataAccess.instance.getAColumnFrom<String,Person>('firstName',afterWhere: "sex=0");
     
-    //Collect all first and last names of Persons
+    //Collect all Person's first and last 
     List<Map<String, Object>> firstNamesAndlastNames= await DataAccess.instance.getSommeColumnsFrom<Person>("firstName,lastName");
     
-    //Collect all first and last names of female persons
+    //Collect all female's first and last names
     List<Map<String, Object>> firstNamesAndlastNamesFemmes= await DataAccess.instance.getSommeColumnsFrom<Person>("firstName,lastName",afterWhere: "sex=0");
     
     //Change Birane's first name to developer and last name KEBE in 2022
     bool witnessUpdatelastNameEtfirstName= await DataAccess.instance.updateSommeColumnsOf<Person>(['firstName','lastName'],['firstName','lastName'],['developper','2022','Birane','KEBE']);
     
-    //delete a Person with firstName Fatou
+    //Delete a Person with firstName Fatou
     bool witnessDelFatou= await DataAccess.instance.deleteObjet<Person>("firstName='Fatou'");
     
-    //Count the lastNumber of Persons
+    //Count the number of Persons
     int nbPerson= await DataAccess.instance.countElementsOf<Person>();
     
     //Counts the lastNumber of Male Person
@@ -136,8 +136,8 @@
     Image readTestImage=await DiscData.instance.getImageFromDisc('my_image.png');
 
     //Read a data whitch name is store in columns of a table. Let's suppose that we have a table named Images whitch have
-    a colums named imageName and an image named image_test.jpg.
-    To load that image as bytes array :
+    //a colums named imageName and an image named image_test.jpg.
+    //To load that image as bytes array :
     Uint8List readTestImageAsBytes=await DiscData.instance.getEntityFileOnDisc<Uint8List, Images>('imageName','imageID',1);
 
     runApp(Container());

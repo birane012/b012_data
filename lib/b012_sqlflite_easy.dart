@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:b012_data/b012_disc_data.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
 class DataAccess {
@@ -67,8 +68,7 @@ class DataAccess {
       await createTableIfNotExists(object);
       await database.transaction((txn) async {
         await txn
-            .insert(object.runtimeType.toString(),
-                mapToUseForInsert(object.toMap()))
+            .insert(object.runtimeType.toString(), mapToUse(object.toMap()))
             .then((value) {
           witness = value;
         }).catchError((_) {});
@@ -93,9 +93,7 @@ class DataAccess {
       await database.transaction((txn) async {
         for (var object in objectlist) {
           if (object != null) {
-            await txn
-                .insert(table, mapToUseForInsert(object.toMap()))
-                .then((value) {
+            await txn.insert(table, mapToUse(object.toMap())).then((value) {
               witness = value > 0;
             }).catchError((_) {
               witness = false;
@@ -108,23 +106,12 @@ class DataAccess {
     return witness;
   }
 
-  ///us cas of mapToUseForInsert method we shoud have:
-  Map<String, dynamic> mapToUseForInsert(Map<String, dynamic> objetToMap) {
-    return objetToMap.map((key, value) {
-      if (value is ColumnType)
-        return MapEntry(key, null);
-      else if (value is bool)
-        return MapEntry(key, value ? 1 : 0);
-      else if (value is DateTime) return MapEntry(key, value.toString());
-
-      return MapEntry(key, value);
-    });
-  }
-
   ///For user login validate<br/><br/>
   ///Example:<br/>
-  ///Account account=await DataAccess.instance.getLogin<Account>(Account(),'email',email,'passWord',passWord);<br/><br/>
-  ///Where email and passWord are the login information of the user that wants to log in
+  ///Account account=await DataAccess.instance.getLogin<Account>(Account(),'email',email,'passWord',passWord);
+  ///Where email and passWord are the login information of the user that wants to log in.<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<T> getLogin<T>(
       var tableEntityInstance,
       String identifierColumnName,
@@ -142,7 +129,9 @@ class DataAccess {
     return null;
   }
 
-  ///returns a specific objet of type T (T=one of your entities) or null if that object do not existe
+  ///Returns a specific objet of type T (T=one of your entities) or null if that object do not existe.<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<T> get<T>(var tableEntityInstance, String afterWhere) async {
     List<Map<String, Object>> res;
     Database database = await db;
@@ -169,7 +158,9 @@ class DataAccess {
     return null;
   }*/
 
-  ///returns all objects of type T stored on db. (T=one of your entities) or null if there are no object of type T present on database
+  ///Returns all objects of type T stored on db. (T=one of your entities) or null if there are no object of type T present on database<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<List<T>> getAll<T>(var tableEntityInstance) async {
     List<Map<String, Object>> res;
     Database database = await db;
@@ -182,7 +173,9 @@ class DataAccess {
     return null;
   }
 
-  ///returns all objects of type T that satify the afterWhere condition (T=one of your entities) or null if no object is find were stored in database
+  ///Returns all objects of type T that satify the afterWhere condition (T=one of your entities) or null if no object is find were stored in database<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<List<T>> getAllSorted<T>(
       var tableEntityInstance, String afterWhere) async {
     List<Map<String, Object>> res;
@@ -208,16 +201,22 @@ class DataAccess {
     await getSommeColumnsFrom<T>(columnName, afterWhere: afterWhere)
         .then((resultat) {
       dataList = resultat.map((line) => line[columnName] as C).toList();
-    }).catchError((_) {});
+    }).catchError((error) {
+      debugPrint("\n\n${error.toString()}\n\n");
+    });
     return dataList;
   }
 
   ///An other version of getAColumnFrom method that take the name of the entity table as parameter.<br/>
-  ///This method is use when we prefer to provide the table name as parameter or for<br/>
+  ///This method is use when we prefer to provide the table or tables name as parameter or for<br/>
   ///quering none entity tables like sqlite_master.<br/>
   ///As an exemple this method is used by method like cleanAllTablesData() which<br/>
   ///use sqfite system table named sqlite_master to find all tables names of the used database.<br/>
-  ///and drop theire data.
+  ///and drop theire data.<br/><br/>
+  ///This method can also be use for getting a column from join tables. For that, table will be take names <br/>
+  ///of different tables concern by the operation [[with their alias]] separated by comma.<br/>
+  ///Exemeple :<br/>
+  ///List<String> customNames=await getAColumnFromWithTableName<String>('c.name','Custom c, Profil p', afterWhere:"c.profil=p.id and p.name='faithful'")
   Future<List<T>> getAColumnFromWithTableName<T>(
       String columnName, String table,
       {String afterWhere}) async {
@@ -226,13 +225,17 @@ class DataAccess {
             afterWhere: afterWhere)
         .then((resultat) {
       dataList = resultat.map((line) => line[columnName] as T).toList();
-    }).catchError((_) {});
+    }).catchError((error) {
+      debugPrint("\n\n${error.toString()}\n\n");
+    });
     return dataList;
   }
 
   ///Can return any query result as List<Map<String, Object>> where every map is row from the selected table<br/>
   ///Exemple:<br/>
-  ///getSommeColumnsFrom("prenom, nom","Person","usertype","fourniseur");
+  ///List<Map<String, Object>> result = await getSommeColumnsFrom<Person>("firstName, lastName",afterWhere:"id=1");<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<List<Map<String, Object>>> getSommeColumnsFrom<T>(
       String listDesColonne,
       {String afterWhere}) async {
@@ -247,18 +250,22 @@ class DataAccess {
 
   ///This method is use when we prefer to provide the table name as
   ///parameter or for quering none entity tables like sqlite_master.<br/>
-  ///It returns any query result as List<Map<String, Object>> where every map is row from the selected table
+  ///It returns any query result as List<Map<String, Object>> where every map is row from the selected table or tables if
+  ///it's a jointure.<br/><br/>
+  ///Example:<br/>
+  ///List<Map<String, Object>> result = await getSommeColumnsWithTableName("firstName, lastName","Person",afterWhere: "id=1");<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the table already exists to handle this error when affecting.<br/>
   Future<List<Map<String, Object>>> getSommeColumnsWithTableName(
       String listDesColonne, String table,
       {String afterWhere}) async {
-    //Exemple: getSommeColumn("prenom, nom","Person","usertype='fourniseur'");
+    //Exemple:
     List<Map<String, Object>> res;
     Database database = await db;
     await database.transaction((txn) async {
       res = await txn.rawQuery(
           "SELECT $listDesColonne FROM $table ${afterWhere != null ? 'WHERE $afterWhere' : ''}");
     });
-    //List<String> colonnes=listDesColonne.split(',');
     return res; //Toutes les lignes verifiant le critaire
   }
 
@@ -317,125 +324,55 @@ class DataAccess {
         .write('CREATE TABLE ${entity.runtimeType.toString()} (\n');
     Map<String, dynamic> objetToMap = entity.toMap();
     String objectLastFieldName = objetToMap.keys.last;
-    bool haveForeignKey = fKeys != null;
-    const List<String> primitiveTypes = <String>[
-      'String',
-      'int',
-      'double',
-      'bool',
-      'DateTime',
-      'Uint8List'
-    ];
+    bool hasForeignKey = fKeys != null;
 
     String columnType;
-    String columnTypeIfNull;
     objetToMap.forEach((columnName, columnValue) {
-      //columnTypeIfNull=columnValue.toString() OR a value of ['String','int','double','bool','DateTime','Uint8List']
-      // if columnValue was null. In that case columnValue is a value of type ColumnType then
-      // columnValue.toString().split('.').last will also return a value of ['String','int','double','bool','DateTime','Uint8List']
-      columnTypeIfNull = columnValue.toString().split('.').last;
-      if (primitiveTypes.contains(columnTypeIfNull))
-        columnType = columnTypeIfNull;
-      else
-        columnType = columnValue.runtimeType.toString();
+      //columnValue.runtimeType.toString() is a value in ['String','int','double','bool','DateTime','Uint8List']
+      // if columnValue is not null. But, if it's null then columnValue's type must be ColumnType, so columnValue.toString().split('.').last
+      // is in ['String','int','double','bool','DateTime','Uint8List'].
+      //If no default ColumnType was and columnValue is null then the generated type of this fied will be TEXT.
 
-      switch (columnType) {
-        case 'String':
-          createTableStatement.write(_writeTableColumn(
-              columnName,
-              'TEXT',
-              pKeyAuto,
-              notNulls,
-              uniques,
-              checks,
-              defaults,
-              objectLastFieldName,
-              haveForeignKey));
-          break;
-        case 'int':
-          createTableStatement.write(_writeTableColumn(
-              columnName,
-              'INTEGER',
-              pKeyAuto,
-              notNulls,
-              uniques,
-              checks,
-              defaults,
-              objectLastFieldName,
-              haveForeignKey));
-          break;
-        case 'double':
-          createTableStatement.write(_writeTableColumn(
-              columnName,
-              'REAL',
-              pKeyAuto,
-              notNulls,
-              uniques,
-              checks,
-              defaults,
-              objectLastFieldName,
-              haveForeignKey));
-          break;
-        case 'bool':
-          checks ??= {};
-          checks[columnName] = '$columnName in (0,1)';
-          createTableStatement.write(_writeTableColumn(
-              columnName,
-              'INTEGER',
-              pKeyAuto,
-              notNulls,
-              uniques,
-              checks,
-              defaults,
-              objectLastFieldName,
-              haveForeignKey));
-          break;
-        case 'DateTime':
-          createTableStatement.write(_writeTableColumn(
-              columnName,
-              'DATETIME',
-              pKeyAuto,
-              notNulls,
-              uniques,
-              checks,
-              defaults,
-              objectLastFieldName,
-              haveForeignKey));
-          break;
-        case 'Uint8List':
-          createTableStatement.write(_writeTableColumn(
-              columnName,
-              'BLOB',
-              pKeyAuto,
-              notNulls,
-              uniques,
-              checks,
-              defaults,
-              objectLastFieldName,
-              haveForeignKey));
-          break;
-        default:
-          createTableStatement.write(_writeTableColumn(
-              columnName,
-              'TEXT',
-              pKeyAuto,
-              notNulls,
-              uniques,
-              checks,
-              defaults,
-              objectLastFieldName,
-              haveForeignKey));
+      if (columnValue != null)
+        columnType = columnValue is! ColumnType
+            ? columnValue.runtimeType.toString()
+            : columnValue.toString().split('.').last;
+      else
+        columnType = 'String';
+
+      if (columnType == 'bool') {
+        checks ??= {};
+        checks[columnName] = '$columnName in (0,1)';
       }
+
+      createTableStatement.write(_writeTableColumn(
+          columnName,
+          columnType == 'String'
+              ? 'TEXT'
+              : (columnType == 'int' || columnType == 'bool')
+                  ? 'INTEGER'
+                  : columnType == 'double'
+                      ? 'REAL'
+                      : columnType == 'DateTime'
+                          ? 'DATETIME'
+                          : 'BLOB',
+          pKeyAuto,
+          notNulls,
+          uniques,
+          checks,
+          defaults,
+          objectLastFieldName,
+          hasForeignKey));
     });
 
-    if (haveForeignKey) {
+    if (hasForeignKey) {
       String lastFKeyField = fKeys.keys.last;
       fKeys.forEach((fkField, refEntityAndField) {
         createTableStatement.write(
             "FOREIGN KEY($fkField) REFERENCES ${refEntityAndField[0]}(${refEntityAndField[1]})${fkField != lastFKeyField ? ',\n' : '\n)'}");
       });
     }
-    print("\n\n" + createTableStatement.toString());
+    debugPrint("\n\n" + createTableStatement.toString());
     return createTableStatement.toString();
   }
 
@@ -450,12 +387,14 @@ class DataAccess {
       res = await txn.rawQuery(
           "SELECT SQL FROM sqlite_master WHERE type='table' AND name='${T.toString()}'");
       if (res.isNotEmpty) {
-        String tableSQL = res.first['sql'];
-        List<String> columnLine = tableSQL.split('\n');
-        columnLine = columnLine.sublist(1, columnLine.length - 1);
-        columnName = [];
-        for (String colName in columnLine)
-          columnName.add(colName.split(' ')[0]);
+        List<String> columnLine = (res.first['sql'] as String).split('\n');
+        columnName =
+            columnLine.sublist(1, columnLine.length - 1).map((colName) {
+          if (colName.split(' ')[0] != 'FOREIGN')
+            return colName.split(' ')[0];
+          else
+            return null;
+        }).toList();
       }
     });
     return columnName;
@@ -525,6 +464,7 @@ class DataAccess {
     return false;
   }
 
+  ///Drop an entity table form the sqlite database.
   Future<void> dropTable<T>() async {
     Database database = await db;
     await database.transaction((txn) async {
@@ -532,7 +472,7 @@ class DataAccess {
     });
   }
 
-  Future<void> modifyATableStructure(
+/*  Future<void> _modifyATableStructure(
       String tableName, String createTableString) async {
     Database database = await db;
     await database.transaction((txn) async {
@@ -541,10 +481,10 @@ class DataAccess {
           "UPDATE sqlite_master SET SQL = '$createTableString' WHERE NAME = '$tableName'");
       txn.execute("PRAGMA writable_schema = 0");
     });
-  }
+  }*/
 
   /*-----------------------------------For update-------------------------------------------------*/
-  ///Use for updating one or many fied or an entity (T) table<br/>
+  ///Use for updating one or many fied of an  entity (T) table<br/>
   ///- The order or columns and their values must be respected<br/>
   ///* Example:<br/>
   ///    Using rawUpdate directely:<br/>
@@ -561,14 +501,21 @@ class DataAccess {
       columnsToUpadateString.write(
           column != columnsToUpadate.last ? "$column = ?, " : "$column = ? ");
 
-    int temoin;
+    int witness;
     Database database = await db;
     await database.transaction((txn) async {
-      temoin = await txn.rawUpdate(
-          'UPDATE ${T.toString()} SET ${columnsToUpadateString.toString()} WHERE ${_getWhereString(whereColumns, whereMcop)}',
-          values);
+      await txn
+          .rawUpdate(
+              'UPDATE ${T.toString()} SET ${columnsToUpadateString.toString()} WHERE ${_getWhereString(whereColumns, whereMcop)}',
+              values)
+          .then((value) {
+        witness = value;
+      }).catchError((error) {
+        witness = 0;
+        debugPrint("\n\n${error.toString()}\n\n");
+      });
     });
-    return temoin > 0;
+    return witness > 0;
   }
 
   /// Update all fieds of an entity object except the primary key<br/>
@@ -581,9 +528,16 @@ class DataAccess {
     Database database = await db;
     int witness;
     await database.transaction((txn) async {
-      witness = await txn.update(
-          newObject.runtimeType.toString(), newObject.toMap(),
-          where: _getWhereString(whereColumns, whereMcop), whereArgs: values);
+      await txn
+          .update(newObject.runtimeType.toString(), mapToUse(newObject.toMap()),
+              where: _getWhereString(whereColumns, whereMcop),
+              whereArgs: values)
+          .then((value) {
+        witness = value;
+      }).catchError((error) {
+        witness = 0;
+        debugPrint("\n\n${error.toString()}\n\n");
+      });
     });
     return witness > 0;
   }
@@ -604,36 +558,43 @@ class DataAccess {
   }
 
   ///Example:<br/>
-  ///bool witness=await deleteObjet<Test>([['email','passWord']],[['test@gmail.com','passer']])
+  ///bool witness=await deleteObjet<Test>([['email','passWord']],[['test@gmail.com','passer']])<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<bool> delObjet<T>(List<String> whereColumns, List<Object> whereArgs,
       {String whereMcop = "and"}) async {
     int res;
     Database database = await db;
     await database.transaction((txn) async {
       res = await txn.delete(T.toString(),
-          where: _getWhereString(whereColumns, whereMcop), whereArgs: whereArgs);
+          where: _getWhereString(whereColumns, whereMcop),
+          whereArgs: whereArgs);
     });
     return res > 0;
   }
 
   ///delete and object(s) on database base on afterWhere<br/>
   ///bool witness=await deleteObjet<Fichier>("id=1");
-  Future<bool> deleteObjet<T>(String afterWhere) async {
+  ///Warning!!!. If afterWhere is null then the table will be truncated.<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
+  Future<bool> deleteObjet<T>([String afterWhere]) async {
     int res;
     Database database = await db;
     await database.transaction((txn) async {
-      res =
-          await txn.rawDelete("DELETE FROM ${T.toString()} WHERE $afterWhere");
+      res = await txn.rawDelete(
+          "DELETE FROM ${T.toString()} ${afterWhere != null ? "WHERE $afterWhere" : ""}");
     });
     return res > 0;
   }
 
   /// Counts the number of elements of type T or depending to expression and afterWhere condition.<br/>
   /// - expression = [['*' ou 'DISTINCT | ALL Expression']]<br/>
-  /// Example: expression ='distinct nom'
+  /// Example: expression ='distinct name.<br/><br/>
+  ///This methode can throw no such table Error. <br/>
+  ///Consider using catchErr or onError methods if you are not sure that the table already exists to handle this error when affecting.<br/>
   Future<int> countElementsOf<T>(
       {String expression = '*', String afterWhere}) async {
-    //for(int i in .range())
     List<Map<String, Object>> res;
     Database database = await db;
     await database.transaction((txn) async {
@@ -644,13 +605,30 @@ class DataAccess {
   }
 }
 
-extension StringNumberExtension on String {
+///Use when we want to convert an entity to a map for database insertion or is it like a normal Map in our code.<br/>
+///By default, forDB is set to true because the method is use by the package for inserting enties data.<br/>
+///into their corresponding tables. <br/><br/>
+///Set, forDB to false if it's not for database insertion.
+Map<String, dynamic> mapToUse(Map<String, dynamic> objetToMap,
+    {bool forDB = true}) {
+  return objetToMap.map((key, value) {
+    if (value is ColumnType)
+      return MapEntry(key, null);
+    else if (value is bool && forDB)
+      return MapEntry(key, value ? 1 : 0);
+    else if (value is DateTime && forDB) return MapEntry(key, value.toString());
+
+    return MapEntry(key, value);
+  });
+}
+
+extension ExtraUsefullFunctionExtension on String {
   String get spacedNumbers => this.replaceAllMapped(
       RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]} ');
 }
 
 ///
-List<int> range(int lenOrStart, [int end]) {
+Iterable<int> range(int lenOrStart, [int end]) {
   int tmp;
   if (end != null && end < lenOrStart) {
     tmp = end;
@@ -658,8 +636,8 @@ List<int> range(int lenOrStart, [int end]) {
     lenOrStart = tmp;
   }
   return end == null
-      ? List.generate(lenOrStart, (index) => index)
-      : List.generate(end - lenOrStart, (index) => lenOrStart++);
+      ? Iterable.generate(lenOrStart, (index) => index)
+      : Iterable.generate(end - lenOrStart, (index) => lenOrStart++);
 }
 
 ///getter than returns a key of 32 random characters of numerics,majuscules and minuscules

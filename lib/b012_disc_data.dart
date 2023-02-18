@@ -43,8 +43,8 @@ class DiscData {
   String getParentDir(String path) => (path.split('/')..removeLast()).join('/');
 
   ///Use for saving data to a specific path on disc<br/>
-  ///* If path is not provid data will be save in the application directory name files.<br/>
-  ///* If path (entire Lunix or windows path) is provide, fileName must be null<br/>
+  ///* If path is not provid data will be saved in the application directory name files.<br/>
+  ///* If path (entire Lunix or windows path) is provide data will be saved in that specific path.<br/>
   ///* If DataType (type of the data we want to save) equals DataType.text it will be saved as text file<br/>
   /// else it is saved as binary file (e.g for image, audio,pdf,video etc.)<br/>
   ///* About recursive:<br/>
@@ -163,6 +163,12 @@ class DiscData {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (file.existsSync()) return file;
     return null;
+  }
+
+  Future<bool> deleteFile(String fileName, {String path}) async {
+    File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
+    if (file.existsSync()) file.deleteSync();
+    return !file.existsSync();
   }
 
   ///* returns the Image or null if image do not exist

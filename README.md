@@ -105,6 +105,19 @@
     //A top level function that dumps all data from database tables.
     await cleanAllTablesData();
 
+    /*Important !!! : 
+    1. Most of the package methods that query entity's tables can throw no such table Error if table doesn't exist
+        except updateWholeObject, updateSommeColumnsOf, getAColumnFromWithTableName, and getAColumnFrom. For these methods
+        the error is already handled but its message is display to help you when debugging.
+        For other methods, consider using catchError or onError methods to handle it and do the appropriate action.
+    2. Wrap your entitiy's toMap() method with the mapToUse(Map<String, dynamic> objetToMap,{bool forDB = true}) like below
+        mapToUse(entityInstance.toMap(), forDB: false) if you want to convert your entity to a normal Map<String, dynamic> 
+        for performing some operation. mapToUse(entityInstance.toMap()) is used by the package, precisely by Future<bool> insertObjet(var object), and Future<bool> insertObjetList(List objectlist) methods for inserting entity's data 
+        into their corresponding tables. 
+    3. In queries afterWhere consider using 0 and 1 for boolean attributs. 1 for true, and 0 for false.
+        Exampe: int nbMen = await DataAccess.instance.countElementsOf<Person>(afterWhere: 'sex=1');
+    */
+
 
      /////////// DiscData.instance /////////////
 

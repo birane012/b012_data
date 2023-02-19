@@ -201,6 +201,18 @@ class DiscData {
               .readFileAsString(null, path: path + "/" + urls[0]) as D
           : await DiscData.instance.readFileAsString(urls[0]) as D;
   }
+  }
+
+///Check if internet connection is available.
+Future<bool> get isInternetAvailable async {
+  bool status;
+  await InternetAddress.lookup('google.com').then((internetAddressList){
+    status = true;//internetAddressList.isNotEmpty && internetAddressList.first.rawAddress.isNotEmpty;
+  }).onError((error, stackTrace){
+    if(error is SocketException)
+      status = false;
+  });
+  return status;
 }
 
 enum DataType { text, base64, bytes }

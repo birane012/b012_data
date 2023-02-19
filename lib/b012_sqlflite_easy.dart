@@ -386,6 +386,7 @@ class DataAccess {
     await database.transaction((txn) async {
       res = await txn.rawQuery(
           "SELECT SQL FROM sqlite_master WHERE type='table' AND name='${T.toString()}'");
+
       if (res.isNotEmpty) {
         List<String> columnLine = (res.first['sql'] as String).split('\n');
         columnName =

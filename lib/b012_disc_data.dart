@@ -190,12 +190,12 @@ class DiscData {
     if (D == Uint8List)
       return path != null
           ? await DiscData.instance
-              .readFileAsBytes(path: "${path}/${urls.first}") as D
+              .readFileAsBytes(path: "$path/${urls.first}") as D
           : await DiscData.instance.readFileAsBytes(fileName: urls.first) as D;
     else
       return path != null
           ? await DiscData.instance
-              .readFileAsString(path: "${path}/${urls.first}") as D
+              .readFileAsString(path: "$path/${urls.first}") as D
           : await DiscData.instance.readFileAsString(fileName: urls.first) as D;
   }
 }

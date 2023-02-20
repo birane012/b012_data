@@ -10,30 +10,25 @@ import 'package:path_provider/path_provider.dart';
 class DiscData {
   static final DiscData instance = DiscData._privateNamedConstructor();
   DiscData._privateNamedConstructor();
-  String _rootPath;
-  String _databasesPath;
-  String _filesPath;
+  String? _rootPath;
+  String? _databasesPath;
+  String? _filesPath;
 
   Future<String> get rootPath async {
-    _rootPath ??= (await getApplicationDocumentsDirectory()).path;
-    return _rootPath;
+    return _rootPath ?? (await getApplicationDocumentsDirectory()).path;
   }
 
   Future<String> get databasesPath async {
-    _databasesPath ??=
-        getParentDir((await getApplicationDocumentsDirectory()).path) +
-            "/databases";
-    return _databasesPath;
+    return _databasesPath ??
+        "${getParentDir((await getApplicationDocumentsDirectory()).path)}/databases";
   }
 
   Future<String> get filesPath async {
-    _filesPath ??=
-        getParentDir((await getApplicationDocumentsDirectory()).path) +
-            "/files";
-    return _filesPath;
+    return _filesPath ??
+        "${getParentDir((await getApplicationDocumentsDirectory()).path)}/files";
   }
 
-  Future<bool> checkFileExists(String fileName, {String path}) async =>
+  Future<bool> checkFileExists({String? fileName, String? path}) async =>
       File(validatePath(path) ?? "${await filesPath}/$fileName").existsSync();
 
   ///get reduce url path by one directory.<br/>
@@ -53,8 +48,8 @@ class DiscData {
   ///  If recursive is true, all non-existing parent paths are created first.<br/>
   ///  Throws a FileSystemException if the operation fails.<br/><br/>
   ///* returns the name of the file or  null if null or empty data was given
-  Future<String> saveDataToDisc(var data, DataType dataType,
-      {String takeThisName, String path, bool recursive = false}) async {
+  Future<String?> saveDataToDisc(var data, DataType dataType,
+      {String? takeThisName, String? path, bool recursive = false}) async {
     if (data != null && data.isNotEmpty) {
       String fileName;
       if (path != null)
@@ -85,8 +80,8 @@ class DiscData {
   ///* If path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* If DataType (type of the data we want to save) equals DataType.text it will append the given string to the text file<br/>
   /// else it appends the data as bytes to the file<br/>
-  Future<void> appendDataToFile(var data, DataType dataType, String fileName,
-      {String path}) async {
+  Future<void> appendDataToFile(var data, DataType dataType,
+      {String? fileName, String? path}) async {
     File fileToSave =
         File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (data != null && data.isNotEmpty && fileToSave.existsSync()) {
@@ -106,7 +101,7 @@ class DiscData {
   ///Check if the given path is correct.<br/>
   ///If the path wasn't correct it will correct it and return a god one<br/>
   ///* returns null if null or empty path was given
-  String validatePath(String path) {
+  String? validatePath(String? path) {
     if (path != null && path.isNotEmpty) {
       StringBuffer validPath = StringBuffer();
       int len = path.length;
@@ -132,7 +127,7 @@ class DiscData {
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* returns file as base64 string or null if file do not exists
-  Future<String> readFileAsBase64(String fileName, {String path}) async {
+  Future<String?> readFileAsBase64({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (file.existsSync())
       return base64Encode(
@@ -143,15 +138,15 @@ class DiscData {
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* returns file as bytes (Uint8List) or null if file do not exists
-  Future<Uint8List> readFileAsBytes(String fileName, {String path}) async {
+  Future<Uint8List?> readFileAsBytes({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (file.existsSync()) return file.readAsBytesSync();
     return null;
   }
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
-  ///* returns the text store in file or null if file do not exists
-  Future<String> readFileAsString(String fileName, {String path}) async {
+  ///* returns the text store in file or null if file do not exists<br/>
+  Future<String?> readFileAsString({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (file.existsSync()) return file.readAsStringSync();
     return null;
@@ -159,32 +154,34 @@ class DiscData {
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null.<br/>
   ///* returns the file or null if file do not exists
-  Future<File> getFile(String fileName, {String path}) async {
+  Future<File?> getFile({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (file.existsSync()) return file;
     return null;
   }
 
-  Future<bool> deleteFile(String fileName, {String path}) async {
+  Future<bool> deleteFile({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
     if (file.existsSync()) file.deleteSync();
     return !file.existsSync();
   }
 
-  ///* returns the Image or null if image do not exist
-  Future<Image> getImageFromDisc(String imageName,
-      {String path, BoxFit fit = BoxFit.fill}) async {
+  ///* returns the Image or null if image do not exist.
+  ///It takes imageName if image is in files directory or the the entire path of the image.
+  Future<Image?> getImageFromDisc(
+      {String? imageName, String? path, BoxFit fit = BoxFit.fill}) async {
     if (imageName == null || imageName.isEmpty) return null;
     return Image.memory(
-        await DiscData.instance.readFileAsBytes(imageName, path: path),
+        (await DiscData.instance
+            .readFileAsBytes(fileName: imageName, path: path))!,
         fit: fit);
   }
 
   ///It will take the url from T's table and get the file on path/fileName or the systePath/fileName<br/>
   ///D is the type of the loaded data (Unit8List, String, integer, etc)
-  Future<D> getEntityFileOnDisc<D, T>(
+  Future<D?> getEntityFileOnDisc<D, T>(
       String urlColumnName, String key, dynamic value,
-      {String path}) async {
+      {String? path}) async {
     var urls = await DataAccess.instance.getAColumnFrom<String, T>(
         urlColumnName,
         afterWhere: "$key='$value' LIMIT 1");
@@ -193,24 +190,23 @@ class DiscData {
     if (D == Uint8List)
       return path != null
           ? await DiscData.instance
-              .readFileAsBytes(null, path: path + "/" + urls[0]) as D
-          : await DiscData.instance.readFileAsBytes(urls[0]) as D;
+              .readFileAsBytes(path: "${path}/${urls.first}") as D
+          : await DiscData.instance.readFileAsBytes(fileName: urls.first) as D;
     else
       return path != null
           ? await DiscData.instance
-              .readFileAsString(null, path: path + "/" + urls[0]) as D
-          : await DiscData.instance.readFileAsString(urls[0]) as D;
+              .readFileAsString(path: "${path}/${urls.first}") as D
+          : await DiscData.instance.readFileAsString(fileName: urls.first) as D;
   }
-  }
+}
 
 ///Check if internet connection is available.
 Future<bool> get isInternetAvailable async {
-  bool status;
-  await InternetAddress.lookup('google.com').then((internetAddressList){
-    status = true;//internetAddressList.isNotEmpty && internetAddressList.first.rawAddress.isNotEmpty;
-  }).onError((error, stackTrace){
-    if(error is SocketException)
-      status = false;
+  bool status = true;
+  await InternetAddress.lookup('google.com').onError((error, stackTrace) {
+    if (error is SocketException) status = false;
+    return []; //This is for the onError method. Because the body might complete normally, causing 'null' to be returned,
+    // but the return type, 'FutureOr<List<InternetAddress>>', is a potentially non-nullable type.
   });
   return status;
 }

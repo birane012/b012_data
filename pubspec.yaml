@@ -1,11 +1,11 @@
 name: b012_data
 description: b012_data is a package that allow you to build, generate and manipulate data (sqlfite and disc files) very easily
-version: 0.0.10
+version: 0.0.11
 homepage: https://github.com/birane012
 repository: https://github.com/birane012/b012_data.git
 
 environment:
-  sdk: ">=2.7.0 <3.0.0"
+  sdk: ">=2.12.0 <3.0.0"
   flutter: ">=1.17.0"
 
 dependencies:

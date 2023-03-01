@@ -14,19 +14,16 @@ class DiscData {
   String? _databasesPath;
   String? _filesPath;
 
-  Future<String> get rootPath async {
-    return _rootPath ?? (await getApplicationDocumentsDirectory()).path;
-  }
+  Future<String> get rootPath async =>
+      _rootPath ?? (await getApplicationDocumentsDirectory()).path;
 
-  Future<String> get databasesPath async {
-    return _databasesPath ??
-        "${getParentDir((await getApplicationDocumentsDirectory()).path)}/databases";
-  }
+  Future<String> get databasesPath async =>
+      _databasesPath ??
+      "${getParentDir((await getApplicationDocumentsDirectory()).path)}/databases";
 
-  Future<String> get filesPath async {
-    return _filesPath ??
-        "${getParentDir((await getApplicationDocumentsDirectory()).path)}/files";
-  }
+  Future<String> get filesPath async =>
+      _filesPath ??
+      "${getParentDir((await getApplicationDocumentsDirectory()).path)}/files";
 
   Future<bool> checkFileExists({String? fileName, String? path}) async =>
       File(validatePath(path) ?? "${await filesPath}/$fileName").existsSync();
@@ -129,35 +126,32 @@ class DiscData {
   ///* returns file as base64 string or null if file do not exists
   Future<String?> readFileAsBase64({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
-    if (file.existsSync())
-      return base64Encode(
-          File(validatePath(path) ?? "${await filesPath}/$fileName")
-              .readAsBytesSync());
-    return null;
+    return file.existsSync()
+        ? base64Encode(
+            File(validatePath(path) ?? "${await filesPath}/$fileName")
+                .readAsBytesSync())
+        : null;
   }
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* returns file as bytes (Uint8List) or null if file do not exists
   Future<Uint8List?> readFileAsBytes({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
-    if (file.existsSync()) return file.readAsBytesSync();
-    return null;
+    return file.existsSync() ? file.readAsBytesSync() : null;
   }
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null<br/>
   ///* returns the text store in file or null if file do not exists<br/>
   Future<String?> readFileAsString({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
-    if (file.existsSync()) return file.readAsStringSync();
-    return null;
+    return file.existsSync() ? file.readAsStringSync() : null;
   }
 
   ///if path (entire Lunix or windows path) is provide, fileName must be null.<br/>
   ///* returns the file or null if file do not exists
   Future<File?> getFile({String? fileName, String? path}) async {
     File file = File(validatePath(path) ?? "${await filesPath}/$fileName");
-    if (file.existsSync()) return file;
-    return null;
+    return file.existsSync() ? file : null;
   }
 
   Future<bool> deleteFile({String? fileName, String? path}) async {
@@ -189,8 +183,8 @@ class DiscData {
 
     if (D == Uint8List)
       return path != null
-          ? await DiscData.instance
-              .readFileAsBytes(path: "$path/${urls.first}") as D
+          ? await DiscData.instance.readFileAsBytes(path: "$path/${urls.first}")
+              as D
           : await DiscData.instance.readFileAsBytes(fileName: urls.first) as D;
     else
       return path != null

@@ -12,13 +12,11 @@ class DataAccess {
   DataAccess._privateNamedConstructor();
   static Database? _db;
 
-  Future<Database> get db async {
-    return _db ??= await openDatabase(
-        await DiscData.instance.readFileAsString(
-                path: '${await DiscData.instance.databasesPath}/dbName') ??
-            'sqlf_easy.db',
-        version: 1);
-  }
+  Future<Database> get db async => _db ??= await openDatabase(
+      await DiscData.instance.readFileAsString(
+              path: '${await DiscData.instance.databasesPath}/dbName') ??
+          'sqlf_easy.db',
+      version: 1);
 
   /*
       Directory documentDirectory = await getApplicationDocumentsDirectory();
@@ -65,9 +63,8 @@ class DataAccess {
   Future<bool> insertObjet(var object) async {
     int witness = 0;
     if (object != null) {
-      Database database = (await db);
       await createTableIfNotExists(object);
-      await database.transaction((txn) async {
+      await (await db).transaction((txn) async {
         await txn
             .insert(object.runtimeType.toString(), mapToUse(object.toMap()))
             .then((value) {
@@ -88,10 +85,9 @@ class DataAccess {
   Future<bool> insertObjetList(List? objectlist) async {
     bool witness = false;
     if (objectlist != null && objectlist.isNotEmpty) {
-      Database database = (await db);
       String table = objectlist.first.runtimeType.toString();
       await createTableIfNotExists(objectlist.first);
-      await database.transaction((txn) async {
+      await (await db).transaction((txn) async {
         for (var object in objectlist) {
           if (object != null) {
             await txn.insert(table, mapToUse(object.toMap())).then((value) {
@@ -108,15 +104,13 @@ class DataAccess {
   }
 
   ///Remplace true or false in afterWhere string respectively by 1 or 0.
-  String _clearAfterWhereFromBoolsAndDateTime(String afterWhere) {
-    return afterWhere
-        .replaceAll(RegExp(r"\s*=\s*true"), " = 1") //turn true to 1
-        .replaceAll(RegExp(r"\s*=\s*false"), " = 0") //turn false to 0
-        .replaceAllMapped(
-            RegExp(
-                r"\s*=\s*\d{4}(-\d{2}){2}([ :]\d{2}){3}[.]?\d{0,6}"), //turn dateTime to string for database.
-            (Match m) => " = '${m.group(0)?.split('=').last.trim()}'");
-  }
+  String _clearAfterWhereFromBoolsAndDateTime(String afterWhere) => afterWhere
+      .replaceAll(RegExp(r"\s*=\s*true"), " = 1") //turn true to 1
+      .replaceAll(RegExp(r"\s*=\s*false"), " = 0") //turn false to 0
+      .replaceAllMapped(
+          RegExp(
+              r"\s*=\s*\d{4}(-\d{2}){2}([ :]\d{2}){3}[.]?\d{0,6}"), //turn dateTime to string for database.
+          (Match m) => " = '${m.group(0)?.split('=').last.trim()}'");
 
   ///For user login validate<br/><br/>
   ///Example:<br/>
@@ -131,11 +125,9 @@ class DataAccess {
       String passWordColumnName,
       String passWordValue) async {
     List<Map<String, Object?>> res;
-    Database database = (await db);
-    res = await database.transaction((txn) async {
-      return await txn.rawQuery(
-          "SELECT * FROM ${T.toString()} WHERE $identifierColumnName = '$identifierValue' and $passWordColumnName = '$passWordValue'");
-    });
+    res = await (await db).transaction((txn) async => await txn.rawQuery(
+        "SELECT * FROM ${T.toString()} WHERE $identifierColumnName = ? and $passWordColumnName = ?",
+        [identifierValue, passWordValue]));
 
     if (res.isNotEmpty) return tableEntityInstance.fromMap(res.first);
     return null;
@@ -146,14 +138,9 @@ class DataAccess {
   ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<T?> get<T>(var tableEntityInstance, String afterWhere) async {
     List<Map<String, Object?>> res;
-    Database database = (await db);
-    res = await database.transaction((txn) async {
-      return await txn.rawQuery(
-          "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}");
-    });
-
-    if (res.isNotEmpty) return tableEntityInstance.fromMap(res.first);
-    return null;
+    res = await (await db).transaction((txn) async => await txn.rawQuery(
+        "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}"));
+    return res.isNotEmpty ? tableEntityInstance.fromMap(res.first) : null;
   }
 
   //returns a specific objet of type T (T=one of your entities) or null if that object do not existe
@@ -175,14 +162,11 @@ class DataAccess {
   ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<List<T>?> getAll<T>(var tableEntityInstance) async {
     List<Map<String, Object?>> res;
-    Database database = (await db);
-    res = await database.transaction((txn) async {
-      return await txn.query(T.toString());
-    });
-
-    if (res.isNotEmpty)
-      return res.map((c) => tableEntityInstance.fromMap(c) as T).toList();
-    return null;
+    res = await (await db)
+        .transaction((txn) async => await txn.query(T.toString()));
+    return res.isNotEmpty
+        ? res.map((c) => tableEntityInstance.fromMap(c) as T).toList()
+        : null;
   }
 
   ///Returns all objects of type T that satify the afterWhere condition (T=one of your entities) or null if no object is find were stored in database<br/><br/>
@@ -191,15 +175,11 @@ class DataAccess {
   Future<List<T>?> getAllSorted<T>(
       var tableEntityInstance, String afterWhere) async {
     List<Map<String, Object?>> res;
-    Database database = (await db);
-    res = await database.transaction((txn) async {
-      return await txn.rawQuery(
-          "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}");
-    });
-
-    if (res.isNotEmpty)
-      return res.map((c) => tableEntityInstance.fromMap(c) as T).toList();
-    return null;
+    res = await (await db).transaction((txn) async => await txn.rawQuery(
+        "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}"));
+    return res.isNotEmpty
+        ? res.map((c) => tableEntityInstance.fromMap(c) as T).toList()
+        : null;
   }
 
   ///Returns a column of type (C)  from an entity of type (T)<br/><br/>
@@ -251,13 +231,8 @@ class DataAccess {
   Future<List<Map<String, Object?>>> getSommeColumnsFrom<T>(
       String listDesColonne,
       {String? afterWhere}) async {
-    List<Map<String, Object?>> res;
-    Database database = (await db);
-    res = await database.transaction((txn) async {
-      return (await txn.rawQuery(
-          "SELECT $listDesColonne FROM ${T.toString()} ${afterWhere != null ? 'WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}' : ''}"));
-    });
-    return res;
+    return await (await db).transaction((txn) async => await txn.rawQuery(
+        "SELECT $listDesColonne FROM ${T.toString()} ${afterWhere != null ? 'WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}' : ''}"));
   }
 
   ///This method is use when we prefer to provide the table name as
@@ -271,23 +246,16 @@ class DataAccess {
   Future<List<Map<String, Object?>>> getSommeColumnsWithTableName(
       String listDesColonne, String table,
       {String? afterWhere}) async {
-    List<Map<String, Object?>> res;
-    Database database = (await db);
-    res = await database.transaction((txn) async {
-      return (await txn.rawQuery(
-          "SELECT $listDesColonne FROM $table ${afterWhere != null ? 'WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}' : ''}"));
-    });
-    return res; //Toutes les lignes verifiant le critaire
+    return await (await db).transaction((txn) async => await txn.rawQuery(
+        "SELECT $listDesColonne FROM $table ${afterWhere != null ? 'WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}' : ''}"));
+    //Toutes les lignes verifiant le critaire
   }
 
   ///create an entity table if not exists.
   Future<void> createTableIfNotExists(var entity) async {
-    if (!await checkIfTableExists(entity.runtimeType.toString())) {
-      Database database = (await db);
-      await database.transaction((txn) async {
-        txn.execute(showCreateTable(entity));
-      });
-    }
+    if (!await checkIfTableExists(entity.runtimeType.toString()))
+      await (await db)
+          .transaction((txn) async => txn.execute(showCreateTable(entity)));
   }
 
   ///returns the create table statement of the given object.
@@ -391,12 +359,12 @@ class DataAccess {
   ///It is us to controlle if new column was added or deleted and ALTER the<br/>
   ///corresponding entiity table for adding or deleting that column.
   Future<List<String>> getEntityColumnsName<T>() async {
-    Database database = await db;
     List<Map<String, Object?>> res;
     List<String> columnName = List.empty();
-    await database.transaction((txn) async {
+    await (await db).transaction((txn) async {
       res = await txn.rawQuery(
           "SELECT SQL FROM sqlite_master WHERE type='table' AND name='${T.toString()}'");
+
       if (res.isNotEmpty) {
         List<String> columnName = (res.first['sql'] as String).split('\n');
         columnName = columnName
@@ -446,40 +414,20 @@ class DataAccess {
   }
 
   ///check if table already exists.
-  Future<bool> checkIfTableExists(String table) async {
-    List<Map<String, Object?>> res;
-    Database database = await db;
-    res = await database.transaction((txn) async {
-      return await txn.rawQuery(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'");
-    });
-
-    if (res.isNotEmpty) return true;
-
-    return false;
-  }
+  Future<bool> checkIfTableExists(String table) async =>
+      (await (await db).transaction((txn) async => await txn.rawQuery(
+              "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'")))
+          .isNotEmpty;
 
   ///check if entity table already exists.
-  Future<bool> checkIfEntityTableExists<T>() async {
-    List<Map<String, Object?>> res;
-    Database database = await db;
-    res = await database.transaction((txn) async {
-      return await txn.rawQuery(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='${T.toString()}'");
-    });
-
-    if (res.isNotEmpty) return true;
-
-    return false;
-  }
+  Future<bool> checkIfEntityTableExists<T>() async =>
+      (await (await db).transaction((txn) async => await txn.rawQuery(
+              "SELECT name FROM sqlite_master WHERE type='table' AND name='${T.toString()}'")))
+          .isNotEmpty;
 
   ///Drop an entity table form the sqlite database.
-  Future<void> dropTable<T>() async {
-    Database database = await db;
-    await database.transaction((txn) async {
-      await txn.execute("DROP TABLE IF EXISTS ${T.toString()}");
-    });
-  }
+  Future<void> dropTable<T>() async => await (await db).transaction(
+      (txn) async => await txn.execute("DROP TABLE IF EXISTS ${T.toString()}"));
 
 /*  Future<void> _modifyATableStructure(
       String tableName, String createTableString) async {
@@ -506,8 +454,7 @@ class DataAccess {
       List<String> whereColumns, List<Object> values,
       {String whereMcop = "and"}) async {
     int witness = 0;
-    Database database = await db;
-    await database.transaction((txn) async {
+    await (await db).transaction((txn) async {
       await txn
           .rawUpdate(
               'UPDATE ${T.toString()} SET ${_preparedColumns(columnsToUpadate, ',')} WHERE ${_preparedColumns(whereColumns, whereMcop)}',
@@ -529,9 +476,8 @@ class DataAccess {
   Future<bool> updateWholeObject(
       var newObject, List<String> whereColumns, List<Object> values,
       {String whereMcop = "and"}) async {
-    Database database = await db;
     int witness = 0;
-    await database.transaction((txn) async {
+    await (await db).transaction((txn) async {
       await txn
           .update(newObject.runtimeType.toString(), mapToUse(newObject.toMap()),
               where: _preparedColumns(whereColumns, whereMcop),
@@ -547,52 +493,39 @@ class DataAccess {
 
   ///Check for sqlite no supported type (boolean, DateTime) and correct them to be accepted.<br/>
   ///Boolean values are convert to a value of {0,1}, DateTimes are convert to String for update operations.
-  List<Object> _checkForBoolAndDateTime(List<Object> values) {
-    return values.map((columnValue) {
-      if (columnValue is bool)
-        return columnValue ? 1 : 0;
-      else if (columnValue is DateTime) return columnValue.toString();
-      return columnValue;
-    }).toList();
-  }
+  List<Object> _checkForBoolAndDateTime(List<Object> values) =>
+      values.map((columnValue) {
+        if (columnValue is bool)
+          return columnValue ? 1 : 0;
+        else if (columnValue is DateTime) return columnValue.toString();
+        return columnValue;
+      }).toList();
 
   ///Returns a prepared string of a list of columns for sql query. whereMcop = where Mutlicondition Operation
-  String _preparedColumns(List<String> whereColumns, String whereMcop) {
-    return whereColumns
-        .map((whereColumn) => "$whereColumn= ?")
-        .join(' $whereMcop ');
-  }
+  String _preparedColumns(List<String> whereColumns, String whereMcop) =>
+      whereColumns.map((whereColumn) => "$whereColumn= ?").join(' $whereMcop ');
 
   ///Example:<br/>
   ///bool witness=await deleteObjet<Test>([['email','passWord']],[['test@gmail.com','passer']])<br/><br/>
   ///This methode can throw no such table Error. <br/>
   ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<bool> delObjet<T>(List<String> whereColumns, List<Object> whereArgs,
-      {String whereMcop = "and"}) async {
-    int res;
-    Database database = await db;
-    res = await database.transaction((txn) async {
-      return await txn.delete(T.toString(),
+          {String whereMcop = "and"}) async =>
+      (await (await db).transaction((txn) async => await txn.delete(
+          T.toString(),
           where: _preparedColumns(whereColumns, whereMcop),
-          whereArgs: whereArgs);
-    });
-    return res > 0;
-  }
+          whereArgs: whereArgs))) >
+      0;
 
   ///delete and object(s) on database base on afterWhere<br/>
   ///bool witness=await deleteObjet<Fichier>("id=1");
   ///Warning!!!. If afterWhere is null then the table will be truncated.<br/><br/>
   ///This methode can throw no such table Error. <br/>
   ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
-  Future<bool> deleteObjet<T>([String? afterWhere]) async {
-    int res;
-    Database database = await db;
-    res = await database.transaction((txn) async {
-      return await txn.rawDelete(
-          "DELETE FROM ${T.toString()} ${afterWhere != null ? "WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}" : ""}");
-    });
-    return res > 0;
-  }
+  Future<bool> deleteObjet<T>([String? afterWhere]) async =>
+      (await (await db).transaction((txn) async => await txn.rawDelete(
+          "DELETE FROM ${T.toString()} ${afterWhere != null ? "WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}" : ""}"))) >
+      0;
 
   /// Counts the number of elements of type T or depending to expression and afterWhere condition.<br/>
   /// - expression = [['*' ou 'DISTINCT | ALL Expression']]<br/>
@@ -602,23 +535,18 @@ class DataAccess {
   Future<int> countElementsOf<T>(
       {String expression = '*', String? afterWhere}) async {
     List<Map<String, Object?>> res;
-    Database database = await db;
-    res = await database.transaction((txn) async {
-      return await txn.rawQuery(
-          "SELECT count($expression) FROM ${T.toString()}${afterWhere != null ? " WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}" : ""}");
-    });
+    res = await (await db).transaction((txn) async => await txn.rawQuery(
+        "SELECT count($expression) FROM ${T.toString()}${afterWhere != null ? " WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}" : ""}"));
     return Sqflite.firstIntValue(res)!;
   }
 
   Future<void> cleanAllTablesData() async {
-    await DataAccess.instance.db.then((value) async {
-      await DataAccess.instance
-          .getAColumnFromWithTableName<String>('name', 'sqlite_master',
-              afterWhere: "type='table'")
-          .then((tables) async {
-        await value.transaction((txn) async {
-          for (String table in tables) await txn.execute("DELETE FROM $table");
-        });
+    await DataAccess.instance
+        .getAColumnFromWithTableName<String>('name', 'sqlite_master',
+            afterWhere: "type='table'")
+        .then((tables) async {
+      await (await db).transaction((txn) async {
+        for (String table in tables) await txn.execute("DELETE FROM $table");
       });
     });
   }

@@ -13,12 +13,12 @@ class DiscData {
   String? _rootPath;
   String? _databasesPath;
   String? _filesPath;
-  String _pathJoin = !Platform.isWindows ? '/' : '\\';
+  final _pathJoin = !Platform.isWindows ? '/' : '\\';
 
   ///Returns the default directory name where files saved without precise path are stored.<br/>
   ///In Windows it's C:\Users\userName. User have access to this directory without using the app<br/>
   ///So to avoid that he delete some data we make it a hidden directory (.files)
-  String _defaultFilesDirectory = !Platform.isWindows ? 'files' : '.files';
+  final _defaultFilesDirectory = !Platform.isWindows ? 'files' : '.files';
 
   Future<String> get rootPath async =>
       _rootPath ?? (await getApplicationDocumentsDirectory()).path;
@@ -56,10 +56,11 @@ class DiscData {
       {String? takeThisName, String? path, bool recursive = false}) async {
     if (data != null && data.isNotEmpty) {
       String fileName;
-      if (path != null)
+      if (path != null) {
         fileName = path.split(_pathJoin).last;
-      else
+      } else {
         fileName = takeThisName ?? DateTime.now().toString();
+      }
 
       if (Platform.isWindows) fileName = fileName.replaceAll(':', '');
 
@@ -117,10 +118,11 @@ class DiscData {
         len++;
       }
 
-      if (path.endsWith('/') || path.endsWith('\\'))
+      if (path.endsWith('/') || path.endsWith('\\')) {
         validPath.write(path.substring(0, len - 2));
-      else
+      } else {
         validPath.write(path);
+      }
 
       return validPath.toString().replaceAll(RegExp(r"[/\\]+"), _pathJoin);
     }
@@ -192,16 +194,17 @@ class DiscData {
         afterWhere: "$key='$value' LIMIT 1");
     if (urls.isEmpty) return null;
 
-    if (D == Uint8List)
+    if (D == Uint8List) {
       return path != null
           ? await DiscData.instance
               .readFileAsBytes(path: "$path$_pathJoin${urls.first}") as D
           : await DiscData.instance.readFileAsBytes(fileName: urls.first) as D;
-    else
+    } else {
       return path != null
           ? await DiscData.instance
               .readFileAsString(path: "$path$_pathJoin${urls.first}") as D
           : await DiscData.instance.readFileAsString(fileName: urls.first) as D;
+    }
   }
 }
 

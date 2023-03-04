@@ -62,8 +62,9 @@ class DataAccess {
             : await databaseFactoryFfi.openDatabase(newDBNameCorrectName);
         debugPrint("\n\nDatabase changed with success !\n\n");
       }
-    } else
+    } else {
       debugPrint("\n\nYou provide a null or empty sting !\n\n");
+    }
   }
 
   ///This methode allow to save an objet to your sqflite db<br/>
@@ -265,9 +266,10 @@ class DataAccess {
 
   ///create an entity table if not exists.
   Future<void> createTableIfNotExists(var entity) async {
-    if (!await checkIfTableExists(entity.runtimeType.toString()))
+    if (!await checkIfTableExists(entity.runtimeType.toString())) {
       await (await db)
           .transaction((txn) async => txn.execute(showCreateTable(entity)));
+    }
   }
 
   ///returns the create table statement of the given object.
@@ -324,12 +326,13 @@ class DataAccess {
       // is in ['String','int','double','bool','DateTime','Uint8List'].
       //If no default ColumnType was and columnValue is null then the generated type of this fied will be TEXT.
 
-      if (columnValue != null)
+      if (columnValue != null) {
         columnType = columnValue is! ColumnType
             ? columnValue.runtimeType.toString()
             : columnValue.toString().split('.').last;
-      else
+      } else {
         columnType = 'String';
+      }
 
       if (columnType == 'bool') {
         checks ??= {};
@@ -363,7 +366,7 @@ class DataAccess {
             "FOREIGN KEY($fkField) REFERENCES ${refEntityAndField.first}(${refEntityAndField[1]})${fkField != lastFKeyField ? ',\n' : '\n)'}");
       });
     }
-    debugPrint("\n\n" + createTableStatement.toString());
+    debugPrint("\n\n$createTableStatement");
     return createTableStatement.toString();
   }
 
@@ -408,17 +411,21 @@ class DataAccess {
       if (pKeyAuto.value) tableColumn.write(" AUTOINCREMENT");
     }
 
-    if (notNulls != null && notNulls.contains(columnName))
+    if (notNulls != null && notNulls.contains(columnName)) {
       tableColumn.write(" NOT NULL");
+    }
 
-    if (uniques != null && uniques.contains(columnName))
+    if (uniques != null && uniques.contains(columnName)) {
       tableColumn.write(" UNIQUE");
+    }
 
-    if (defaults != null && defaults.containsKey(columnName))
+    if (defaults != null && defaults.containsKey(columnName)) {
       tableColumn.write(" DEFAULT ${defaults[columnName]}");
+    }
 
-    if (checks != null && checks.containsKey(columnName))
+    if (checks != null && checks.containsKey(columnName)) {
       tableColumn.write(" CHECK(${checks[columnName]})");
+    }
 
     tableColumn.write(
         columnName != objectLastFieldName || haveForeignKey ? ",\n" : "\n)");
@@ -507,9 +514,11 @@ class DataAccess {
   ///Boolean values are convert to a value of {0,1}, DateTimes are convert to String for update operations.
   List<Object> _checkForBoolAndDateTime(List<Object> values) =>
       values.map((columnValue) {
-        if (columnValue is bool)
+        if (columnValue is bool) {
           return columnValue ? 1 : 0;
-        else if (columnValue is DateTime) return columnValue.toString();
+        } else if (columnValue is DateTime) {
+          return columnValue.toString();
+        }
         return columnValue;
       }).toList();
 
@@ -558,7 +567,9 @@ class DataAccess {
             afterWhere: "type='table'")
         .then((tables) async {
       await (await db).transaction((txn) async {
-        for (String table in tables) await txn.execute("DELETE FROM $table");
+        for (String table in tables) {
+          await txn.execute("DELETE FROM $table");
+        }
       });
     });
   }
@@ -571,18 +582,20 @@ class DataAccess {
 Map<String, dynamic> mapToUse(Map<String, dynamic> objetToMap,
     {bool forDB = true}) {
   return objetToMap.map((key, value) {
-    if (value is ColumnType)
+    if (value is ColumnType) {
       return MapEntry(key, null);
-    else if (value is bool && forDB)
+    } else if (value is bool && forDB) {
       return MapEntry(key, value ? 1 : 0);
-    else if (value is DateTime && forDB) return MapEntry(key, value.toString());
+    } else if (value is DateTime && forDB) {
+      return MapEntry(key, value.toString());
+    }
 
     return MapEntry(key, value);
   });
 }
 
 extension ExtraUsefullFunctionExtension on String {
-  String get spacedNumbers => this.replaceAllMapped(
+  String get spacedNumbers => replaceAllMapped(
       RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]} ');
 }
 
@@ -605,7 +618,9 @@ String get newKey {
   String numericsAndChars =
       "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   StringBuffer key = StringBuffer();
-  for (int i = 0; i < 32; i++) key.write(numericsAndChars[rng.nextInt(62)]);
+  for (int i = 0; i < 32; i++) {
+    key.write(numericsAndChars[rng.nextInt(62)]);
+  }
   return key.toString();
 }
 

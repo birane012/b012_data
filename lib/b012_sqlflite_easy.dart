@@ -2,21 +2,28 @@ library b012_data;
 
 import 'dart:async';
 import 'dart:math';
-
-import 'package:b012_data/b012_disc_data.dart';
+import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:b012_data/b012_disc_data.dart';
 
 class DataAccess {
   static final DataAccess instance = DataAccess._privateNamedConstructor();
-  DataAccess._privateNamedConstructor();
-  static Database? _db;
+  Database? _db;
+  DataAccess._privateNamedConstructor() {
+    // Init ffi loader if needed.
+    sqfliteFfiInit();
+  }
 
-  Future<Database> get db async => _db ??= await openDatabase(
-      await DiscData.instance.readFileAsString(
+  Future<Database> get db async => _db ??= !Platform.isWindows
+      ? await openDatabase(await DiscData.instance.readFileAsString(
               path: '${await DiscData.instance.databasesPath}/dbName') ??
-          'sqlf_easy.db',
-      version: 1);
+          'sqlf_easy.db')
+      : await databaseFactoryFfi.openDatabase(await DiscData.instance
+              .readFileAsString(
+                  path: '${await DiscData.instance.databasesPath}\\dbName') ??
+          'sqlf_easy.db');
 
   /*
       Directory documentDirectory = await getApplicationDocumentsDirectory();
@@ -29,9 +36,13 @@ class DataAccess {
       - real path from Device manager:/data/data/sn.prose.ersen.ersen/databases/ersen.db
       print("path======>$path");
   */
-  Future<Database> openDB(String dbPath) async => await openDatabase(dbPath);
+  Future<Database> openDB(String dbPath) async => !Platform.isWindows
+      ? await openDatabase(dbPath)
+      : await databaseFactoryFfi.openDatabase(dbPath);
 
-  Future<void> dropDB(String dbPath) async => await deleteDatabase(dbPath);
+  Future<void> dropDB(String dbPath) async => !Platform.isWindows
+      ? await deleteDatabase(dbPath)
+      : await databaseFactoryFfi.deleteDatabase(dbPath);
 
   ///Use for changing the default sqflite database (sqlf_easy.db) to a database of your preference<br/>
   ///Or simply switch beetween your existing databases.<br/>
@@ -46,7 +57,9 @@ class DataAccess {
           path: "${await DiscData.instance.databasesPath}/dbName");
       if (dbName != null) {
         await _db!.close();
-        _db = await openDatabase(newDBNameCorrectName, version: 1);
+        _db = Platform.isWindows
+            ? await openDatabase(newDBNameCorrectName, version: 1)
+            : await databaseFactoryFfi.openDatabase(newDBNameCorrectName);
         debugPrint("\n\nDatabase changed with success !\n\n");
       }
     } else
@@ -124,10 +137,10 @@ class DataAccess {
       String identifierValue,
       String passWordColumnName,
       String passWordValue) async {
-    List<Map<String, Object?>> res;
-    res = await (await db).transaction((txn) async => await txn.rawQuery(
-        "SELECT * FROM ${T.toString()} WHERE $identifierColumnName = ? and $passWordColumnName = ?",
-        [identifierValue, passWordValue]));
+    List<Map<String, Object?>> res = await (await db).transaction((txn) async =>
+        await txn.rawQuery(
+            "SELECT * FROM ${T.toString()} WHERE $identifierColumnName = ? and $passWordColumnName = ?",
+            [identifierValue, passWordValue]));
 
     if (res.isNotEmpty) return tableEntityInstance.fromMap(res.first);
     return null;
@@ -137,9 +150,9 @@ class DataAccess {
   ///This methode can throw no such table Error. <br/>
   ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<T?> get<T>(var tableEntityInstance, String afterWhere) async {
-    List<Map<String, Object?>> res;
-    res = await (await db).transaction((txn) async => await txn.rawQuery(
-        "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}"));
+    List<Map<String, Object?>> res = await (await db).transaction((txn) async =>
+        await txn.rawQuery(
+            "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}"));
     return res.isNotEmpty ? tableEntityInstance.fromMap(res.first) : null;
   }
 
@@ -161,8 +174,7 @@ class DataAccess {
   ///This methode can throw no such table Error. <br/>
   ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<List<T>?> getAll<T>(var tableEntityInstance) async {
-    List<Map<String, Object?>> res;
-    res = await (await db)
+    List<Map<String, Object?>> res = await (await db)
         .transaction((txn) async => await txn.query(T.toString()));
     return res.isNotEmpty
         ? res.map((c) => tableEntityInstance.fromMap(c) as T).toList()
@@ -174,9 +186,9 @@ class DataAccess {
   ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
   Future<List<T>?> getAllSorted<T>(
       var tableEntityInstance, String afterWhere) async {
-    List<Map<String, Object?>> res;
-    res = await (await db).transaction((txn) async => await txn.rawQuery(
-        "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}"));
+    List<Map<String, Object?>> res = await (await db).transaction((txn) async =>
+        await txn.rawQuery(
+            "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}"));
     return res.isNotEmpty
         ? res.map((c) => tableEntityInstance.fromMap(c) as T).toList()
         : null;
@@ -534,10 +546,10 @@ class DataAccess {
   ///Consider using catchErr or onError methods if you are not sure that the table already exists to handle this error when affecting.<br/>
   Future<int> countElementsOf<T>(
       {String expression = '*', String? afterWhere}) async {
-    List<Map<String, Object?>> res;
-    res = await (await db).transaction((txn) async => await txn.rawQuery(
-        "SELECT count($expression) FROM ${T.toString()}${afterWhere != null ? " WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}" : ""}"));
-    return Sqflite.firstIntValue(res)!;
+    List<Map<String, Object?>> res = await (await db).transaction((txn) async =>
+        await txn.rawQuery(
+            "SELECT count($expression) countElement FROM ${T.toString()}${afterWhere != null ? " WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}" : ""}"));
+    return res.first['countElement'] as int;
   }
 
   Future<void> cleanAllTablesData() async {

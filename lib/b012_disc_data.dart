@@ -13,7 +13,7 @@ class DiscData {
   String? _rootPath;
   String? _databasesPath;
   String? _filesPath;
-  final _pathJoin = !Platform.isWindows ? '/' : '\\';
+  final pathJoin = !Platform.isWindows ? '/' : '\\';
 
   ///Returns the default directory name where files saved without precise path are stored.<br/>
   ///In Windows it's C:\Users\userName. User have access to this directory without using the app<br/>
@@ -24,14 +24,14 @@ class DiscData {
       _rootPath ?? (await getApplicationDocumentsDirectory()).path;
 
   Future<String> get databasesPath async =>
-      _databasesPath ?? "${getParentDir(await rootPath)}${_pathJoin}databases";
+      _databasesPath ?? "${getParentDir(await rootPath)}${pathJoin}databases";
 
   Future<String> get filesPath async =>
       _filesPath ??
-      "${getParentDir(await rootPath)}$_pathJoin$_defaultFilesDirectory";
+      "${getParentDir(await rootPath)}$pathJoin$_defaultFilesDirectory";
 
   Future<bool> checkFileExists({String? fileName, String? path}) async =>
-      File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName")
+      File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName")
           .existsSync();
 
   ///get reduce url path by one directory.<br/>
@@ -39,7 +39,7 @@ class DiscData {
   /// if path = "/flutter/app/dir/test"<br/>
   /// getParentDir(path) returns "/flutter/app/dir"
   String getParentDir(String path) =>
-      (path.split(_pathJoin)..removeLast()).join(_pathJoin);
+      (path.split(pathJoin)..removeLast()).join(pathJoin);
 
   ///Use for saving data to a specific path on disc<br/>
   ///* If path is not provid data will be saved in the application directory name files.<br/>
@@ -57,7 +57,7 @@ class DiscData {
     if (data != null && data.isNotEmpty) {
       String fileName;
       if (path != null) {
-        fileName = path.split(_pathJoin).last;
+        fileName = path.split(pathJoin).last;
       } else {
         fileName = takeThisName ?? DateTime.now().toString();
       }
@@ -65,7 +65,7 @@ class DiscData {
       if (Platform.isWindows) fileName = fileName.replaceAll(':', '');
 
       File fileToSave =
-          File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName");
+          File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName");
       fileToSave.createSync(recursive: recursive);
       switch (dataType) {
         case DataType.text:
@@ -90,7 +90,7 @@ class DiscData {
   Future<void> appendDataToFile(var data, DataType dataType,
       {String? fileName, String? path}) async {
     File fileToSave =
-        File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName");
+        File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName");
     if (data != null && data.isNotEmpty && fileToSave.existsSync()) {
       switch (dataType) {
         case DataType.text:
@@ -124,7 +124,7 @@ class DiscData {
         validPath.write(path);
       }
 
-      return validPath.toString().replaceAll(RegExp(r"[/\\]+"), _pathJoin);
+      return validPath.toString().replaceAll(RegExp(r"[/\\]+"), pathJoin);
     }
 
     return null;
@@ -134,10 +134,10 @@ class DiscData {
   ///* returns file as base64 string or null if file do not exists
   Future<String?> readFileAsBase64({String? fileName, String? path}) async {
     File file =
-        File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName");
+        File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName");
     return file.existsSync()
         ? base64Encode(
-            File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName")
+            File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName")
                 .readAsBytesSync())
         : null;
   }
@@ -146,7 +146,7 @@ class DiscData {
   ///* returns file as bytes (Uint8List) or null if file do not exists
   Future<Uint8List?> readFileAsBytes({String? fileName, String? path}) async {
     File file =
-        File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName");
+        File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName");
     return file.existsSync() ? file.readAsBytesSync() : null;
   }
 
@@ -154,7 +154,7 @@ class DiscData {
   ///* returns the text store in file or null if file do not exists<br/>
   Future<String?> readFileAsString({String? fileName, String? path}) async {
     File file =
-        File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName");
+        File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName");
     return file.existsSync() ? file.readAsStringSync() : null;
   }
 
@@ -162,13 +162,13 @@ class DiscData {
   ///* returns the file or null if file do not exists
   Future<File?> getFile({String? fileName, String? path}) async {
     File file =
-        File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName");
+        File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName");
     return file.existsSync() ? file : null;
   }
 
   Future<bool> deleteFile({String? fileName, String? path}) async {
     File file =
-        File(validatePath(path) ?? "${await filesPath}$_pathJoin$fileName");
+        File(validatePath(path) ?? "${await filesPath}$pathJoin$fileName");
     if (file.existsSync()) file.deleteSync();
     return !file.existsSync();
   }
@@ -197,12 +197,12 @@ class DiscData {
     if (D == Uint8List) {
       return path != null
           ? await DiscData.instance
-              .readFileAsBytes(path: "$path$_pathJoin${urls.first}") as D
+              .readFileAsBytes(path: "$path$pathJoin${urls.first}") as D
           : await DiscData.instance.readFileAsBytes(fileName: urls.first) as D;
     } else {
       return path != null
           ? await DiscData.instance
-              .readFileAsString(path: "$path$_pathJoin${urls.first}") as D
+              .readFileAsString(path: "$path$pathJoin${urls.first}") as D
           : await DiscData.instance.readFileAsString(fileName: urls.first) as D;
     }
   }

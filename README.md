@@ -1,5 +1,6 @@
 # b012_data is for data manipulations.
 # It provide bean persistance on SQLite database and system file manipulation.
+## It supports Android, iOS, MacOS, Linux and Windows.
 [Clic here for more details.](https://birane012.github.io)
 
     import 'package:b012_data/b012_disc_data.dart';

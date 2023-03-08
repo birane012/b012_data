@@ -1,8 +1,15 @@
+## 1.0.2
+* This version supports ANDROID, IOS, LINUX, MACOS and WINDOWS but peb.dev
+* shows only ANDROID, IOS, MACOS as compatible platforms.
+* This is fixed in this version.
+
 ## 1.0.1+2
-* This version supports ANDROID, IOS, LINUX, MACOS and WINDOWS.
+* This version supports ANDROID, IOS, LINUX, MACOS and WINDOWS but peb.dev 
+* shows only ANDROID, IOS, MACOS as compatible platforms.
 
 ## 1.0.1+1
-* This version supports ANDROID, IOS, LINUX, MACOS and WINDOWS.
+* This version supports ANDROID, IOS, LINUX, MACOS and WINDOWS but peb.dev
+* shows only ANDROID, IOS, MACOS as compatible platforms.
 
 ## 1.0.1
 * Anterior versions of the package supported only ANDROID, IOS and MACOS platforms.

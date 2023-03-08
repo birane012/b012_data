@@ -29,6 +29,8 @@
     Person([this.idPers, this.firstName, this.lastName, this.sex, this.dateOfBirth]);//use by get methods
     
     //Step 3: required
+    //For not nullable fields, it's not necessary to specify ColumnType. 
+    //Because the fied won't be null anyway.
     Map<String,dynamic> toMap() => {
     "idPers": idPers??ColumnType.String,
     "firstName": firstName??ColumnType.String,

@@ -1,29 +1,29 @@
 name: b012_data
-description: b012_data is a package that allow you to build, generate and manipulate data (sqlfite and disc files) very easily
-version: 1.0.2
+description: A very easy to use Flutter package to build, generate and manipulate data. It provides easy SQLite persistence and file-system helpers for Android, iOS, Linux, macOS and Windows.
+version: 2.0.0
 homepage: https://birane012.github.io
 repository: https://github.com/birane012/b012_data.git
 
-#Supported platforms
+# Supported platforms
 platforms:
   android:
   ios:
+  linux:
   macos:
   windows:
-  linux:
 
 environment:
-  sdk: ">=2.12.0 <3.0.0"
-  flutter: ">=1.17.0"
+  sdk: ">=2.12.0 <4.0.0"
+  flutter: ">=2.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  sqflite_common_ffi: ^2.2.1+1
-  sqflite: ^2.2.5
-  path_provider: ^2.0.13
+  sqflite: ">=2.0.0 <3.0.0"
+  sqflite_common_ffi: ">=2.0.0 <3.0.0"
+  path_provider: ">=2.0.0 <3.0.0"
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.1
+  flutter_lints: ">=1.0.0 <7.0.0"

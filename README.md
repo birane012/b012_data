@@ -1,191 +1,251 @@
-# b012_data is for data manipulations.
-# It provide bean persistance on SQLite database and system file manipulation.
-## It supports Android, iOS, MacOS, Linux and Windows.
-[Clic here for more details.](https://birane012.github.io)
+# b012_data
 
-    import 'package:b012_data/b012_disc_data.dart';
-    import 'package:flutter/material.dart';
-    import 'package:b012_data/b012_sqlflite_easy.dart';
-    
-    //Person entity
-    class Person {
-    String? idPers;
-    String? firstName;
-    String? lastName;
-    bool? sex;
-    DateTime? dateOfBirth;
-    //String? email;
-    //String? profestion;
-    
-    //Step 1:
-    MapEntry<String,bool> get pKeyAuto => const MapEntry('idPers', false);//primay key, required
-    List<String> get notNulls => <String>['firstName','lastName','sex','dateOfBirth'];//Not nulable columns, optional
-    //List<String> get uniques => <String>['email']; //unique colums, optional
-    //Map<String,String> get checks => {'email':'length(email)>4'}; //check constrains, optional
-    //Map<String,String> get defaults => {'profestion':'NULL'};//defaul value of columns, optional
-    //Map<String,List<String>> get fKeys => {'profestion':['Profestion','idProf']};//foreign keys, optional
-    
-    //Step 2: required
-    Person([this.idPers, this.firstName, this.lastName, this.sex, this.dateOfBirth]);//use by get methods
-    
-    //Step 3: required
-    //For not nullable fields, it's not necessary to specify ColumnType. 
-    //Because the fied won't be null anyway.
-    Map<String,dynamic> toMap() => {
-    "idPers": idPers??ColumnType.String,
-    "firstName": firstName??ColumnType.String,
-    "lastName": lastName??ColumnType.String,
-    "sex": sex??ColumnType.bool,
-    "dateOfBirth": dateOfBirth??ColumnType.DateTime,
-    };
-    
-    //Step 4: required
-    Person.fromMap(dynamic jsonOrMap,{bool isInt=true}){
-    idPers=jsonOrMap["idPers"];
-    firstName=jsonOrMap["firstName"];
-    lastName=jsonOrMap["lastName"];
-    sex=boolean(jsonOrMap["sex"],isInt: isInt);
-    dateOfBirth=dateTime(jsonOrMap["dateOfBirth"]);
-    }
-    
-    //Step 5: required
-    Person fromMap(dynamic jsonOrMap)=>Person.fromMap(jsonOrMap);
-    }
-    
-    ////////////////////////////////// Use cas example: //////////////////////////////////
-    
-    Future<void> main() async{
-    WidgetsFlutterBinding.ensureInitialized();
-    
-    /////////// DataAccess.instance /////////////
+`b012_data` is a Flutter package focused on **data manipulation**:
 
-    //Show create table query of Person entity
-    debugPrint(DataAccess.instance.showCreateTable(Person()));
-    
-    //Check if the Person table exists in the database
-    bool witnessPersTableExiste= await DataAccess.instance.checkIfEntityTableExists<Person>();
-    
-    //Insert a new person in Person table
-    bool tInsert=await DataAccess.instance.insertObjet(Person(newKey,'KEBE','Birane',true,DateTime(2000,08,05)));
-    
-    //Insert a list of persons in Person table
-    bool tInsertList=await DataAccess.instance.insertObjetList(
-    <Person>[Person(newKey,'Mbaye','Aliou',true,DateTime(1999,05,01)),Person(newKey,'Cisse','Fatou',false,DateTime(2000,07,09))]
-    );
-    
-    //Find a person
-    Person? birane=await DataAccess.instance.get<Person>(Person(),"firstName='Birane' and lastName='KEBE'");
-    
-    //Find all persons in Person table
-    List<Person>? Persons=await DataAccess.instance.getAll<Person>(Person());
-    
-    //Find men in Person table. For boolean type you are free to use 0,1 or true,false. 
-    //The role is that true=1 and false=0. Like the column sex below.
-    List<Person>? men=await DataAccess.instance.getAllSorted<Person>(Person(),'sex=1');
-    
-    //Collect all first names
-    List<String> firstNames=await DataAccess.instance.getAColumnFrom<String,Person>('firstName');
-    
-    //Collect all first names of female persons. 
-    List<String> womensfirstName=await DataAccess.instance.getAColumnFrom<String,Person>('firstName',afterWhere: "sex=false");
-    
-    //Collect all Person's first and last 
-    List<Map<String, Object?>> firstNamesAndlastNames= await DataAccess.instance.getSommeColumnsFrom<Person>("firstName,lastName");
-    
-    //Collect all female's first and last names
-    List<Map<String, Object?>> firstNamesAndlastNamesFemmes= await DataAccess.instance.getSommeColumnsFrom<Person>("firstName,lastName",afterWhere: "sex=0");
-    
-    //Change Birane's first name to developer and last name KEBE in 2022
-    bool witnessUpdatelastNameEtfirstName= await DataAccess.instance.updateSommeColumnsOf<Person>(['firstName','lastName'],['firstName','lastName'],['developper','2022','Birane','KEBE']);
-    
-    //Delete a Person with firstName Fatou.
-    bool witnessDelFatou= await DataAccess.instance.deleteObjet<Person>("firstName='Fatou'");
-    
-    //Count the number of Persons
-    int nbPerson= await DataAccess.instance.countElementsOf<Person>();
-    
-    //Counts the lastNumber of Male Person
-    int nbMen= await DataAccess.instance.countElementsOf<Person>(afterWhere: 'sex=true');
+* Object persistence on a local **SQLite** database, via `DataAccess.instance`.
+* File system helpers (read, write, append, check, delete, load binary files as images, audios, videos and so on), via `DiscData.instance`.
 
-    //A top level function that dumps all data from database tables.
-    await DataAccess.instance.cleanAllTablesData();
+Supported platforms: **Android, iOS, macOS, Linux, Windows**.
 
-    /*Important !!! : 
-    1. Most of the package methods that query entity's tables can DatabaseException(no such table: ...) Error if table doesn't exist
-        except updateWholeObject, updateSommeColumnsOf, getAColumnFromWithTableName, and getAColumnFrom. For these methods
-        the error is already handled but its message is display to help you when debugging.
-        For other methods, consider using catchError or onError methods to handle it and do the appropriate action.
-    2. Wrap your entitiy's toMap() method with the mapToUse(Map<String, dynamic> objetToMap,{bool forDB = true}) like below
-        mapToUse(entityInstance.toMap(), forDB: false) if you want to convert your entity to a normal Map<String, dynamic> 
-        for performing some operation. mapToUse(entityInstance.toMap()) is used by the package, precisely by Future<bool> insertObjet(var object), and Future<bool> insertObjetList(List objectlist) methods for inserting entity's data 
-        into their corresponding tables.
+> On mobile platforms (Android, iOS, macOS) the package uses the native
+> [`sqflite`](https://pub.dev/packages/sqflite) implementation.
+> On desktop platforms (Linux, Windows) it transparently falls back to
+> [`sqflite_common_ffi`](https://pub.dev/packages/sqflite_common_ffi).
 
+More details and a longer walk-through can be found at
+<https://birane012.github.io>.
 
-     /////////// DiscData.instance /////////////
+---
 
-    //databases path
-    String databases=await DiscData.instance.databasesPath;
-    
-    //files path
-    String files=await DiscData.instance.filesPath;
-    
-    //files path
-    String appFlutter=await DiscData.instance.rootPath;
-    
-    //Save text data to disc on files directory
-    String? fileName=await DiscData.instance.saveDataToDisc('contenu du fichier test.txt', DataType.text,takeThisName: 'test.txt');
-    
-    //Check if test.txt file exists
-    bool witnessTestFileExiste=await DiscData.instance.checkFileExists(fileName: 'test.txt');
-    
-    //Read the contents of the test.txt file as string
-    String? readTest=await DiscData.instance.readFileAsString(fileName: 'test.txt');
+## Installation
 
-    //Read the contents of the my_image.png file as base64 string 
-    String? readTestAsBase64=await DiscData.instance.readFileAsBase64(fileName: 'my_image.png');
+Add the package to your `pubspec.yaml`:
 
-    //Read the contents of the image.jpg file as Uint8List (bytes)
-    Uint8List? readTestBytes=await DiscData.instance.readFileAsBytes(fileName: 'my_image.png');
+```yaml
+dependencies:
+  b012_data: ^2.0.0
+```
 
-    //Read image.jpg file as Image
-    Image? readTestImage=await DiscData.instance.getImageFromDisc(fileName: 'my_image.png');
+Then run:
 
-    //Read a data whitch name is store in columns of a table. Let's suppose that we have a table named Images whitch have
-    //a colums named imageName and an image named image_test.jpg.
-    //To load that image as bytes array :
-    Uint8List readTestImageAsBytes=await DiscData.instance.getEntityFileOnDisc<Uint8List, Images>('imageName','imageID',1);
+```sh
+flutter pub get
+```
 
-    runApp(Container());
-    }
+Before calling any method that needs the application documents directory
+(`databasesPath`, `filesPath`, etc.), make sure the Flutter bindings are
+initialized:
 
-    class Images {
-        String? id;
-        String? imageName;
-        DateTime? dateSave;
-        DateTime? dateLastUpdate;
-        MapEntry<String, bool> get pKeyAuto => const MapEntry('id', false); //primay key, required
-        List<String> get notNulls => <String>['imageName','dateSave','sex','dateLastUpdate']; //Not nulable columns, optional
-        
-        Images([this.id, this.imageName, this.dateSave, this.dateLastUpdate]); //use by get methods
-        
-        Map<String, dynamic> toMap() => {
-            "id": id ?? ColumnType.String,
-            "imageName": imageName ?? ColumnType.String,
-            "dateSave": dateSave ?? ColumnType.DateTime,
-            "dateLastUpdate": dateLastUpdate ?? ColumnType.DateTime
-        };
-    
-        Images.fromMap(dynamic jsonOrMap, {bool isInt = true}) {
-            id = jsonOrMap["id"];
-            imageName = jsonOrMap["imageName"];
-            dateSave = dateTime(jsonOrMap["dateSave"]);
-            dateLastUpdate = dateTime(jsonOrMap["dateLastUpdate"]);
-        }
-    
-        Images fromMap(dynamic jsonOrMap) => Images.fromMap(jsonOrMap);
-    }
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // ... your app here
+}
+```
 
+---
 
+## Declaring an entity
 
+An entity is a plain Dart class that exposes a few well-known members used
+by `DataAccess` to generate SQL statements and deserialize rows.
 
+```dart
+import 'package:b012_data/b012_sqlflite_easy.dart';
 
+//Person entity
+class Person {
+  String? idPers;
+  String? firstName;
+  String? lastName;
+  bool? sex;
+  DateTime? dateOfBirth;
+  // String? email;
+  // String? profession;
+
+  // 1. Required: primary key declaration.
+  //    MapEntry key is the column name, value is true to use AUTOINCREMENT.
+  MapEntry<String, bool> get pKeyAuto => const MapEntry('idPers', false);
+
+  // 2. Optional: non-nullable columns, unique columns, check constraints,
+  //    default values and foreign keys.
+  List<String> get notNulls =>
+      <String>['firstName', 'lastName', 'sex', 'dateOfBirth'];
+  // List<String> get uniques => <String>['email'];
+  // Map<String, String> get checks => {'email': 'length(email) > 4'};
+  // Map<String, String> get defaults => {'profession': 'NULL'};
+  // Map<String, List<String>> get fKeys =>
+  //     {'profession': ['Profession', 'idProf']};
+
+  // 3. Required: an unnamed constructor used by the package to instantiate
+  //    an entity from the `fromMap` method below.
+  Person([this.idPers, this.firstName, this.lastName, this.sex, this.dateOfBirth]);
+
+  // 4. Required: serialization to a Map.
+  //    For non-nullable fields the `ColumnType` fallback can be omitted —
+  //    the value will never be null at insertion time.
+  Map<String, dynamic> toMap() => {
+        'idPers': idPers ?? ColumnType.String,
+        'firstName': firstName ?? ColumnType.String,
+        'lastName': lastName ?? ColumnType.String,
+        'sex': sex ?? ColumnType.bool,
+        'dateOfBirth': dateOfBirth ?? ColumnType.DateTime,
+      };
+
+  // 5. Required: deserialization from a row.
+  Person.fromMap(Map<String, Object?> json, {bool isInt = true}) {
+    idPers = json['idPers'] as String?;
+    firstName = json['firstName'] as String?;
+    lastName = json['lastName'] as String?;
+    sex = boolean(json['sex'], isInt: isInt);
+    dateOfBirth = dateTime(json['dateOfBirth'] as String?);
+  }
+
+  // 6. Required: instance-side fromMap used by the generic getters.
+  Person fromMap(Map<String, Object?> json) => Person.fromMap(json);
+}
+```
+
+---
+
+## Working with the database
+
+```dart
+import 'package:b012_data/b012_sqlflite_easy.dart';
+import 'package:flutter/foundation.dart';
+
+Future<void> example() async {
+  // Inspect the CREATE TABLE statement generated for Person.
+  debugPrint(DataAccess.instance.showCreateTable(Person()));
+
+  // Does the Person table already exist?
+  final exists = await DataAccess.instance.checkIfEntityTableExists<Person>();
+
+  // Insert a single Person.
+  final inserted = await DataAccess.instance.insertObjet(
+    Person(newKey, 'KEBE', 'Birane', true, DateTime(2000, 8, 5)),
+  );
+
+  // Insert several Persons in a single transaction.
+  final bulk = await DataAccess.instance.insertObjetList(<Person>[
+    Person(newKey, 'Mbaye', 'Aliou', true, DateTime(1999, 5, 1)),
+    Person(newKey, 'Cisse', 'Fatou', false, DateTime(2000, 7, 9)),
+  ]);
+
+  // Fetch a single row.
+  final Person? birane = await DataAccess.instance
+      .get<Person>(Person(), "firstName = 'Birane' AND lastName = 'KEBE'");
+
+  // Fetch every row.
+  final List<Person>? all = await DataAccess.instance.getAll<Person>(Person());
+
+  // Fetch rows matching a predicate. Booleans are automatically converted
+  // to 0/1 for SQLite.
+  final List<Person>? men = await DataAccess.instance
+      .getAllSorted<Person>(Person(), 'sex = true');
+
+  // Project a single column.
+  final List<String> firstNames = await DataAccess.instance
+      .getAColumnFrom<String, Person>('firstName');
+
+  final List<String> womenFirstNames = await DataAccess.instance
+      .getAColumnFrom<String, Person>('firstName', afterWhere: 'sex = false');
+
+  // Project multiple columns.
+  final rows = await DataAccess.instance
+      .getSommeColumnsFrom<Person>('firstName, lastName');
+
+  final womenRows = await DataAccess.instance.getSommeColumnsFrom<Person>(
+    'firstName, lastName',
+    afterWhere: 'sex = 0',
+  );
+
+  // Update rows. Values follow the order of `columnsToUpadate` + `whereColumns`.
+  final updated = await DataAccess.instance.updateSommeColumnsOf<Person>(
+    ['firstName', 'lastName'],
+    ['firstName', 'lastName'],
+    ['developer', '2022', 'Birane', 'KEBE'],
+  );
+
+  // Delete rows matching a predicate.
+  final deleted = await DataAccess.instance
+      .deleteObjet<Person>("firstName = 'Fatou'");
+
+  // Count rows.
+  final total = await DataAccess.instance.countElementsOf<Person>();
+  final males = await DataAccess.instance
+      .countElementsOf<Person>(afterWhere: 'sex = true');
+
+  // Wipe every user-defined table (tables stay, rows are removed).
+  await DataAccess.instance.cleanAllTablesData();
+}
+```
+
+### Things to know
+
+1. Most entity-oriented methods throw `DatabaseException('no such table:...')`
+   when the underlying table does not exist. The exceptions are
+   `updateWholeObject`, `updateSommeColumnsOf`, `getAColumnFromWithTableName`
+   and `getAColumnFrom`, which catch the error and only log it via
+   `debugPrint`. Wrap the other methods in `try` / `catch` if you are not
+   sure the table already exists.
+2. `insertObjet` and `insertObjetList` internally convert your entity map
+   using `mapToUse(entity.toMap())`. Call `mapToUse(entity.toMap(), forDB: false)`
+   yourself when you want a plain Dart map (e.g. for JSON serialization or
+   display) instead of an SQLite-ready one.
+
+---
+
+## Working with files on disk
+
+```dart
+import 'dart:typed_data';
+import 'package:b012_data/b012_disc_data.dart';
+import 'package:flutter/widgets.dart';
+
+Future<void> fileExample() async {
+  // System paths exposed by the package.
+  final databasesPath = await DiscData.instance.databasesPath;
+  final filesPath = await DiscData.instance.filesPath;
+  final rootPath = await DiscData.instance.rootPath;
+
+  // Write text to disk inside `filesPath`.
+  final fileName = await DiscData.instance.saveDataToDisc(
+    'hello world',
+    DataType.text,
+    takeThisName: 'test.txt',
+  );
+
+  // Check existence.
+  final exists = await DiscData.instance.checkFileExists(fileName: 'test.txt');
+
+  // Read as text / base64 / bytes / Image.
+  final String? text =
+      await DiscData.instance.readFileAsString(fileName: 'test.txt');
+  final String? base64 =
+      await DiscData.instance.readFileAsBase64(fileName: 'my_image.png');
+  final Uint8List? bytes =
+      await DiscData.instance.readFileAsBytes(fileName: 'my_image.png');
+  final Image? image =
+      await DiscData.instance.getImageFromDisc(imageName: 'my_image.png');
+
+  // Load a file whose name is stored in a column of an SQLite table.
+  // Given a table `Images` with a column `imageName`, fetch the bytes of
+  // the image referenced by the row where `imageID = 1`:
+  final Uint8List? imageBytes = await DiscData.instance
+      .getEntityFileOnDisc<Uint8List, Images>('imageName', 'imageID', 1);
+}
+```
+
+---
+
+## Full worked example
+
+See the [`example/`](example) folder for a complete runnable example that
+combines the database and the file-system APIs.
+
+---
+
+## License
+
+Published under the terms of the included [`LICENSE`](LICENSE) file.

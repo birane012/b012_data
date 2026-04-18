@@ -1,279 +1,351 @@
-library b012_data;
-
 import 'dart:async';
-import 'dart:math';
 import 'dart:io';
-import 'package:flutter/cupertino.dart';
-import 'package:sqflite/sqflite.dart';
+import 'dart:math';
+
+import 'package:flutter/foundation.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
 import 'package:b012_data/b012_disc_data.dart';
 
+/// High-level API for persisting Dart objects into a local SQLite database.
+///
+/// [DataAccess] is a singleton: always access it through [DataAccess.instance].
+/// It abstracts the differences between mobile platforms (Android, iOS, macOS),
+/// which use the native `sqflite` plugin, and desktop platforms (Linux, Windows),
+/// which use `sqflite_common_ffi`.
+///
+/// Entities exposed to this API are plain Dart classes that declare:
+///   * A `toMap()` method returning a `Map<String, dynamic>`.
+///   * A named constructor `fromMap(Map<String, Object?>)`.
+///   * An instance method `fromMap(Map<String, Object?>)` used by generic getters.
+///   * Optional getters: `pKeyAuto`, `notNulls`, `uniques`, `checks`, `defaults`, `fKeys`.
+///
+/// See the package README for a complete usage example.
 class DataAccess {
-  static final DataAccess instance = DataAccess._privateNamedConstructor();
+  DataAccess._internal() {
+    if (_needsFfi) {
+      sqfliteFfiInit();
+    }
+  }
+
+  /// Global singleton instance.
+  static final DataAccess instance = DataAccess._internal();
+
   Database? _db;
-  DataAccess._privateNamedConstructor() {
-    // Init ffi loader if needed.
-    sqfliteFfiInit();
+
+  /// Whether the current platform needs the FFI backend (Linux / Windows).
+  static bool get _needsFfi => Platform.isWindows || Platform.isLinux;
+
+  /// Returns the correct [DatabaseFactory] for the current platform.
+  DatabaseFactory get _factory =>
+      _needsFfi ? databaseFactoryFfi : databaseFactory;
+
+  /// Opens (or returns the already opened) application database.
+  ///
+  /// The database name is read from a small text file stored at
+  /// `<databasesPath>/dbName`. If the file does not exist, the default
+  /// name `sqlf_easy.db` is used. The file is created/updated by [changeDB].
+  Future<Database> get db async {
+    if (_db != null) return _db!;
+    final String directory = await DiscData.instance.databasesPath;
+    final String dbFilePath = '$directory${DiscData.instance.pathJoin}dbName';
+    final String name =
+        await DiscData.instance.readFileAsString(path: dbFilePath) ??
+            'sqlf_easy.db';
+    _db = await _factory.openDatabase(name);
+    return _db!;
   }
 
-  Future<Database> get db async => _db ??= !Platform.isWindows
-      ? await openDatabase(await DiscData.instance.readFileAsString(
-              path: '${await DiscData.instance.databasesPath}/dbName') ??
-          'sqlf_easy.db')
-      : await databaseFactoryFfi.openDatabase(await DiscData.instance
-              .readFileAsString(
-                  path: '${await DiscData.instance.databasesPath}\\dbName') ??
-          'sqlf_easy.db');
+  /// Opens a database located at [dbPath] and returns it.
+  ///
+  /// This does NOT replace the cached application database returned by [db].
+  Future<Database> openDB(String dbPath) => _factory.openDatabase(dbPath);
 
-  /*
-      Directory documentDirectory = await getApplicationDocumentsDirectory();
-      path = join(documentDirectory.path, "ersen.db");
-      resultat: path=/data/user/0/sn.prose.ersen.ersen/app_flutter/ersen.db
-    Or
-      String databasesPath = await getDatabasesPath();
-      path = join(databasesPath, "ersen.db")  donne le meme path que si on passe directement le nom de la base a la methode openDatabase
-      - resultat: path=/data/user/0/sn.prose.ersen.ersen/databases/ersen.db
-      - real path from Device manager:/data/data/sn.prose.ersen.ersen/databases/ersen.db
-      print("path======>$path");
-  */
-  Future<Database> openDB(String dbPath) async => !Platform.isWindows
-      ? await openDatabase(dbPath)
-      : await databaseFactoryFfi.openDatabase(dbPath);
+  /// Deletes the database file located at [dbPath].
+  Future<void> dropDB(String dbPath) => _factory.deleteDatabase(dbPath);
 
-  Future<void> dropDB(String dbPath) async => !Platform.isWindows
-      ? await deleteDatabase(dbPath)
-      : await databaseFactoryFfi.deleteDatabase(dbPath);
-
-  ///Use for changing the default sqflite database (sqlf_easy.db) to a database of your preference<br/>
-  ///Or simply switch beetween your existing databases.<br/>
-  ///* if newDBName exists already it will be opened and becomes app's database util next change<br/>
-  ///* If not then it will be created and opened as app's database util next change<br/>
+  /// Switches the application database to [newDBName].
+  ///
+  /// * If [newDBName] already exists it is opened and becomes the current
+  ///   application database until the next call to [changeDB].
+  /// * Otherwise it is created, opened and becomes the current database.
+  ///
+  /// The name (with the `.db` suffix appended if missing) is persisted to disk
+  /// so that subsequent calls to [db] return the same database.
   Future<void> changeDB(String? newDBName) async {
-    if (newDBName != null && newDBName.isNotEmpty) {
-      String newDBNameCorrectName =
-          newDBName += newDBName.endsWith('.db') ? '' : '.db';
-      String? dbName = await DiscData.instance.saveDataToDisc(
-          newDBNameCorrectName, DataType.text,
-          path: "${await DiscData.instance.databasesPath}/dbName");
-      if (dbName != null) {
-        await _db!.close();
-        _db = Platform.isWindows
-            ? await openDatabase(newDBNameCorrectName, version: 1)
-            : await databaseFactoryFfi.openDatabase(newDBNameCorrectName);
-        debugPrint("\n\nDatabase changed with success !\n\n");
+    if (newDBName == null || newDBName.isEmpty) {
+      debugPrint('changeDB called with a null or empty name.');
+      return;
+    }
+
+    final String correctedName =
+        newDBName.endsWith('.db') ? newDBName : '$newDBName.db';
+
+    final String directory = await DiscData.instance.databasesPath;
+    final String dbFilePath = '$directory${DiscData.instance.pathJoin}dbName';
+
+    final String? saved = await DiscData.instance
+        .saveDataToDisc(correctedName, DataType.text, path: dbFilePath);
+    if (saved == null) return;
+
+    if (_db != null) {
+      await _db!.close();
+      _db = null;
+    }
+    _db = await _factory.openDatabase(correctedName);
+    debugPrint('Database successfully changed to $correctedName');
+  }
+
+  /// Closes the current application database (if any).
+  Future<void> closeDB() async {
+    if (_db != null) {
+      await _db!.close();
+      _db = null;
+    }
+  }
+
+  /// Inserts [object] into its corresponding table.
+  ///
+  /// The table is created on first use if it does not exist yet.
+  /// Returns `true` if exactly one row was inserted, `false` otherwise
+  /// (null object, missing/renamed columns, constraint violation, ...).
+  Future<bool> insertObjet(Object? object) async {
+    if (object == null) return false;
+    await createTableIfNotExists(object);
+    int rowId = 0;
+    await (await db).transaction((txn) async {
+      try {
+        rowId = await txn.insert(
+          object.runtimeType.toString(),
+          mapToUse((object as dynamic).toMap() as Map<String, dynamic>),
+        );
+      } catch (e, s) {
+        debugPrint('insertObjet failed: $e\n$s');
       }
-    } else {
-      debugPrint("\n\nYou provide a null or empty sting !\n\n");
-    }
+    });
+    return rowId > 0;
   }
 
-  ///This methode allow to save an objet to your sqflite db<br/>
-  ///Exemple:<br/>
-  ///bool witness=await insertObjet(Person('Mr','developper'));<br/>
-  ///where Person is an existing entity.<br/>
-  ///It can return false in two situations:<br/>
-  ///1 . the object was null<br/>
-  ///2 . insertion not succed due to somme column change or missing
-  Future<bool> insertObjet(var object) async {
-    int witness = 0;
-    if (object != null) {
-      await createTableIfNotExists(object);
-      await (await db).transaction((txn) async {
-        await txn
-            .insert(object.runtimeType.toString(), mapToUse(object.toMap()))
-            .then((value) {
-          witness = value;
-        }).catchError((_) {});
-      });
-    }
-    return witness > 0;
-  }
+  /// Inserts a list of entity objects into their corresponding table.
+  ///
+  /// * All objects must be instances of the same entity class.
+  /// * Returns `true` if every row was inserted successfully, `false` otherwise
+  ///   (null/empty list, missing column, constraint violation, ...).
+  Future<bool> insertObjetList(List<Object?>? objectlist) async {
+    if (objectlist == null || objectlist.isEmpty) return false;
+    final Object? first = objectlist.first;
+    if (first == null) return false;
 
-  ///This methode allow to save an entity's objet list to your sqflite db<br/>
-  ///Exemple:<br/>
-  ///bool witness=await insertObjetList([Person('Mr','developper'),Person('Mme','developper')]);<br/>
-  ///where Person is an existing entity<br/>
-  ///It can return false in two situations:<br/>
-  ///1 . the objectlist was null or empty<br/>
-  ///2 . insertions not succed due to somme column change or missing
-  Future<bool> insertObjetList(List? objectlist) async {
-    bool witness = false;
-    if (objectlist != null && objectlist.isNotEmpty) {
-      String table = objectlist.first.runtimeType.toString();
-      await createTableIfNotExists(objectlist.first);
-      await (await db).transaction((txn) async {
-        for (var object in objectlist) {
-          if (object != null) {
-            await txn.insert(table, mapToUse(object.toMap())).then((value) {
-              witness = value > 0;
-            }).catchError((_) {
-              witness = false;
-            });
-            if (!witness) break;
+    final String table = first.runtimeType.toString();
+    await createTableIfNotExists(first);
+
+    bool allInserted = true;
+    await (await db).transaction((txn) async {
+      for (final Object? object in objectlist) {
+        if (object == null) continue;
+        try {
+          final int rowId = await txn.insert(
+            table,
+            mapToUse((object as dynamic).toMap() as Map<String, dynamic>),
+          );
+          if (rowId <= 0) {
+            allInserted = false;
+            break;
           }
+        } catch (e, s) {
+          debugPrint('insertObjetList failed: $e\n$s');
+          allInserted = false;
+          break;
         }
-      });
-    }
-    return witness;
+      }
+    });
+    return allInserted;
   }
 
-  ///Remplace true or false in afterWhere string respectively by 1 or 0.
-  String _clearAfterWhereFromBoolsAndDateTime(String afterWhere) => afterWhere
-      .replaceAll(RegExp(r"\s*=\s*true"), " = 1") //turn true to 1
-      .replaceAll(RegExp(r"\s*=\s*false"), " = 0") //turn false to 0
+  /// Replaces `true`/`false` / ISO dates in the WHERE clause with SQLite-safe
+  /// literals (`1`/`0`, quoted strings).
+  String _sanitizeWhere(String where) => where
+      .replaceAll(RegExp(r'=\s*true\b'), ' = 1')
+      .replaceAll(RegExp(r'=\s*false\b'), ' = 0')
       .replaceAllMapped(
-          RegExp(
-              r"\s*=\s*\d{4}(-\d{2}){2}([ :]\d{2}){3}[.]?\d{0,6}"), //turn dateTime to string for database.
-          (Match m) => " = '${m.group(0)?.split('=').last.trim()}'");
+        RegExp(r'=\s*\d{4}(-\d{2}){2}([ :]\d{2}){3}[.]?\d{0,6}'),
+        (Match m) => " = '${m.group(0)?.split('=').last.trim()}'",
+      );
 
-  ///For user login validate<br/><br/>
-  ///Example:<br/>
-  ///Account account=await DataAccess.instance.getLogin<Account>(Account(),'email',email,'passWord',passWord);
-  ///Where email and passWord are the login information of the user that wants to log in.<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
+  /// Authenticates a user by matching [identifierColumnName]=[identifierValue]
+  /// and [passwordColumnName]=[passwordValue] against the entity table [T].
+  ///
+  /// Returns the matching entity instance or `null` if no row matches.
+  ///
+  /// Throws [DatabaseException] if the entity table does not exist. Wrap the
+  /// call in `try`/`catch` if you are not sure that the table was created.
   Future<T?> getLogin<T>(
-      var tableEntityInstance,
-      String identifierColumnName,
-      String identifierValue,
-      String passWordColumnName,
-      String passWordValue) async {
-    List<Map<String, Object?>> res = await (await db).transaction((txn) async =>
-        await txn.rawQuery(
-            "SELECT * FROM ${T.toString()} WHERE $identifierColumnName = ? and $passWordColumnName = ?",
-            [identifierValue, passWordValue]));
-
-    if (res.isNotEmpty) return tableEntityInstance.fromMap(res.first);
-    return null;
+    Object tableEntityInstance,
+    String identifierColumnName,
+    String identifierValue,
+    String passwordColumnName,
+    String passwordValue,
+  ) async {
+    final List<Map<String, Object?>> rows = await (await db).transaction(
+      (txn) => txn.rawQuery(
+        'SELECT * FROM ${T.toString()} '
+        'WHERE $identifierColumnName = ? AND $passwordColumnName = ?',
+        <String>[identifierValue, passwordValue],
+      ),
+    );
+    if (rows.isEmpty) return null;
+    return (tableEntityInstance as dynamic).fromMap(rows.first) as T;
   }
 
-  ///Returns a specific objet of type T (T=one of your entities) or null if that object do not existe.<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
-  Future<T?> get<T>(var tableEntityInstance, String afterWhere) async {
-    List<Map<String, Object?>> res = await (await db).transaction((txn) async =>
-        await txn.rawQuery(
-            "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}"));
-    return res.isNotEmpty ? tableEntityInstance.fromMap(res.first) : null;
+  /// Returns a single entity of type [T] matching the [afterWhere] clause, or
+  /// `null` when no row matches.
+  ///
+  /// Throws [DatabaseException] if the entity table does not exist.
+  Future<T?> get<T>(Object tableEntityInstance, String afterWhere) async {
+    final List<Map<String, Object?>> rows = await (await db).transaction(
+      (txn) => txn.rawQuery(
+        'SELECT * FROM ${T.toString()} WHERE ${_sanitizeWhere(afterWhere)}',
+      ),
+    );
+    if (rows.isEmpty) return null;
+    return (tableEntityInstance as dynamic).fromMap(rows.first) as T;
   }
 
-  //returns a specific objet of type T (T=one of your entities) or null if that object do not existe
-  /*Future<T> getObject<T>(String afterWhere) async {
-    var res;
-    var database = await this.db;
-    await database.transaction((txn) async {
-      res = await txn.rawQuery("SELECT * FROM ${T.toString()} WHERE $afterWhere");
-    });
-
-    if (res.length > 0)
-      return allClassMap[T.toString()].fromMap(res.first);
-
-    return null;
-  }*/
-
-  ///Returns all objects of type T stored on db. (T=one of your entities) or null if there are no object of type T present on database<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
-  Future<List<T>?> getAll<T>(var tableEntityInstance) async {
-    List<Map<String, Object?>> res = await (await db)
-        .transaction((txn) async => await txn.query(T.toString()));
-    return res.isNotEmpty
-        ? res.map((c) => tableEntityInstance.fromMap(c) as T).toList()
-        : null;
+  /// Returns every object of type [T] currently stored, or `null` when the
+  /// table is empty.
+  ///
+  /// Throws [DatabaseException] if the entity table does not exist.
+  Future<List<T>?> getAll<T>(Object tableEntityInstance) async {
+    final List<Map<String, Object?>> rows = await (await db)
+        .transaction((txn) => txn.query(T.toString()));
+    if (rows.isEmpty) return null;
+    return rows
+        .map((Map<String, Object?> row) =>
+            (tableEntityInstance as dynamic).fromMap(row) as T)
+        .toList();
   }
 
-  ///Returns all objects of type T that satify the afterWhere condition (T=one of your entities) or null if no object is find were stored in database<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
+  /// Returns every object of type [T] matching [afterWhere], or `null` when
+  /// no row matches.
+  ///
+  /// Throws [DatabaseException] if the entity table does not exist.
   Future<List<T>?> getAllSorted<T>(
-      var tableEntityInstance, String afterWhere) async {
-    List<Map<String, Object?>> res = await (await db).transaction((txn) async =>
-        await txn.rawQuery(
-            "SELECT * FROM ${T.toString()} WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}"));
-    return res.isNotEmpty
-        ? res.map((c) => tableEntityInstance.fromMap(c) as T).toList()
-        : null;
+    Object tableEntityInstance,
+    String afterWhere,
+  ) async {
+    final List<Map<String, Object?>> rows = await (await db).transaction(
+      (txn) => txn.rawQuery(
+        'SELECT * FROM ${T.toString()} WHERE ${_sanitizeWhere(afterWhere)}',
+      ),
+    );
+    if (rows.isEmpty) return null;
+    return rows
+        .map((Map<String, Object?> row) =>
+            (tableEntityInstance as dynamic).fromMap(row) as T)
+        .toList();
   }
 
-  ///Returns a column of type (C)  from an entity of type (T)<br/><br/>
-  ///Example1 : <br/>
-  ///List<String> firstNames=await DataAccess.instance.getAColumnFrom<String,Person>("firstName");<br/><br/>
-  ///Example2 : <br/>
-  ///List<Uint8List> fileContent=await DataAccess.instance.getAColumnFrom<Uint8List,Fichier>("content",afterWhere: "idEntity='1'  LIMIT 1")
-  Future<List<C>> getAColumnFrom<C, T>(String columnName,
-      {String? afterWhere}) async {
-    List<C> dataList = [];
-    await getSommeColumnsFrom<T>(columnName, afterWhere: afterWhere)
-        .then((resultat) {
-      dataList = resultat.map((line) => line[columnName] as C).toList();
-    }).catchError((error) {
-      debugPrint("\n\n${error.toString()}\n\n");
-    });
-    return dataList;
-  }
-
-  ///An other version of getAColumnFrom method that take the name of the entity table as parameter.<br/>
-  ///This method is use when we prefer to provide the table or tables name as parameter or for<br/>
-  ///quering none entity tables like sqlite_master.<br/>
-  ///As an exemple this method is used by method like cleanAllTablesData() which<br/>
-  ///use sqfite system table named sqlite_master to find all tables names of the used database.<br/>
-  ///and drop theire data.<br/><br/>
-  ///This method can also be use for getting a column from join tables. For that, table will be take names <br/>
-  ///of different tables concern by the operation [[with their alias]] separated by comma.<br/>
-  ///Exemeple :<br/>
-  ///List<String> customNames=await getAColumnFromWithTableName<String>('c.name','Custom c, Profil p', afterWhere:"c.profil=p.id and p.name='faithful'")
-  Future<List<T>> getAColumnFromWithTableName<T>(
-      String columnName, String table,
-      {String? afterWhere}) async {
-    List<T> dataList = [];
-    await getSommeColumnsWithTableName(columnName, table,
-            afterWhere: afterWhere)
-        .then((resultat) {
-      dataList = resultat.map((line) => line[columnName] as T).toList();
-    }).catchError((error) {
-      debugPrint("\n\n${error.toString()}\n\n");
-    });
-    return dataList;
-  }
-
-  ///Can return any query result as List<Map<String, Object>> where every map is row from the selected table<br/>
-  ///Exemple:<br/>
-  ///List<Map<String, Object>> result = await getSommeColumnsFrom<Person>("firstName, lastName",afterWhere:"id=1");<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
-  Future<List<Map<String, Object?>>> getSommeColumnsFrom<T>(
-      String listDesColonne,
-      {String? afterWhere}) async {
-    return await (await db).transaction((txn) async => await txn.rawQuery(
-        "SELECT $listDesColonne FROM ${T.toString()} ${afterWhere != null ? 'WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}' : ''}"));
-  }
-
-  ///This method is use when we prefer to provide the table name as
-  ///parameter or for quering none entity tables like sqlite_master.<br/>
-  ///It returns any query result as List<Map<String, Object>> where every map is row from the selected table or tables if
-  ///it's a jointure.<br/><br/>
-  ///Example:<br/>
-  ///List<Map<String, Object>> result = await getSommeColumnsWithTableName("firstName, lastName","Person",afterWhere: "id=1");<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the table already exists to handle this error when affecting.<br/>
-  Future<List<Map<String, Object?>>> getSommeColumnsWithTableName(
-      String listDesColonne, String table,
-      {String? afterWhere}) async {
-    return await (await db).transaction((txn) async => await txn.rawQuery(
-        "SELECT $listDesColonne FROM $table ${afterWhere != null ? 'WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}' : ''}"));
-    //Toutes les lignes verifiant le critaire
-  }
-
-  ///create an entity table if not exists.
-  Future<void> createTableIfNotExists(var entity) async {
-    if (!await checkIfTableExists(entity.runtimeType.toString())) {
-      await (await db)
-          .transaction((txn) async => txn.execute(showCreateTable(entity)));
+  /// Returns every value of column [columnName] (typed as [C]) from the entity
+  /// table [T], optionally filtered by [afterWhere].
+  ///
+  /// Returns an empty list on error; the underlying error is logged with
+  /// [debugPrint] to help debugging.
+  Future<List<C>> getAColumnFrom<C, T>(
+    String columnName, {
+    String? afterWhere,
+  }) async {
+    try {
+      final List<Map<String, Object?>> rows =
+          await getSommeColumnsFrom<T>(columnName, afterWhere: afterWhere);
+      return rows.map((Map<String, Object?> row) => row[columnName] as C).toList();
+    } catch (e, s) {
+      debugPrint('getAColumnFrom failed: $e\n$s');
+      return <C>[];
     }
   }
 
-  ///returns the create table statement of the given object.
-  String showCreateTable(var entity) {
+  /// Like [getAColumnFrom] but accepts an arbitrary [table] name (or a join
+  /// expression). Useful for querying non-entity tables such as
+  /// `sqlite_master` or to run joined queries with table aliases.
+  ///
+  /// Example:
+  /// ```dart
+  /// final names = await DataAccess.instance
+  ///     .getAColumnFromWithTableName<String>(
+  ///       'c.name',
+  ///       'Custom c, Profile p',
+  ///       afterWhere: "c.profile = p.id AND p.name = 'faithful'",
+  ///     );
+  /// ```
+  Future<List<T>> getAColumnFromWithTableName<T>(
+    String columnName,
+    String table, {
+    String? afterWhere,
+  }) async {
+    try {
+      final List<Map<String, Object?>> rows = await getSommeColumnsWithTableName(
+        columnName,
+        table,
+        afterWhere: afterWhere,
+      );
+      return rows.map((Map<String, Object?> row) => row[columnName] as T).toList();
+    } catch (e, s) {
+      debugPrint('getAColumnFromWithTableName failed: $e\n$s');
+      return <T>[];
+    }
+  }
+
+  /// Returns raw rows (as `List<Map<String, Object?>>`) for the columns
+  /// [listDesColonne] of the entity table [T].
+  ///
+  /// Example:
+  /// ```dart
+  /// final rows = await DataAccess.instance
+  ///     .getSommeColumnsFrom<Person>('firstName, lastName', afterWhere: 'id=1');
+  /// ```
+  ///
+  /// Throws [DatabaseException] if the entity table does not exist.
+  Future<List<Map<String, Object?>>> getSommeColumnsFrom<T>(
+    String listDesColonne, {
+    String? afterWhere,
+  }) async {
+    final String whereClause =
+        afterWhere != null ? 'WHERE ${_sanitizeWhere(afterWhere)}' : '';
+    return (await db).transaction(
+      (txn) => txn.rawQuery(
+        'SELECT $listDesColonne FROM ${T.toString()} $whereClause',
+      ),
+    );
+  }
+
+  /// Like [getSommeColumnsFrom] but takes an arbitrary [table] name (or a join
+  /// expression). Useful for non-entity tables or join queries.
+  Future<List<Map<String, Object?>>> getSommeColumnsWithTableName(
+    String listDesColonne,
+    String table, {
+    String? afterWhere,
+  }) async {
+    final String whereClause =
+        afterWhere != null ? 'WHERE ${_sanitizeWhere(afterWhere)}' : '';
+    return (await db).transaction(
+      (txn) => txn.rawQuery('SELECT $listDesColonne FROM $table $whereClause'),
+    );
+  }
+
+  /// Creates the entity table for [entity] if it does not exist yet.
+  Future<void> createTableIfNotExists(Object entity) async {
+    final String tableName = entity.runtimeType.toString();
+    if (await checkIfTableExists(tableName)) return;
+    await (await db)
+        .transaction((txn) => txn.execute(showCreateTable(entity)));
+  }
+
+  /// Returns the `CREATE TABLE` statement generated for [entity] based on the
+  /// getters (`pKeyAuto`, `notNulls`, `uniques`, `checks`, `defaults`, `fKeys`)
+  /// and the types declared in `toMap()`.
+  String showCreateTable(Object entity) {
+    final dynamic e = entity;
+
     MapEntry<String, bool>? pKeyAuto;
     List<String>? notNulls;
     List<String>? uniques;
@@ -282,358 +354,430 @@ class DataAccess {
     Map<String, List<String>>? fKeys;
 
     try {
-      pKeyAuto = entity.pKeyAuto;
-    } catch (e) {
-      pKeyAuto = null;
-    }
+      pKeyAuto = e.pKeyAuto as MapEntry<String, bool>?;
+    } catch (_) {}
     try {
-      notNulls = entity.notNulls;
-    } catch (e) {
-      notNulls = null;
-    }
+      notNulls = (e.notNulls as List?)?.cast<String>();
+    } catch (_) {}
     try {
-      uniques = entity.uniques;
-    } catch (e) {
-      uniques = null;
-    }
+      uniques = (e.uniques as List?)?.cast<String>();
+    } catch (_) {}
     try {
-      checks = entity.checks;
-    } catch (e) {
-      checks = null;
-    }
+      checks = (e.checks as Map?)?.cast<String, String>();
+    } catch (_) {}
     try {
-      defaults = entity.defaults;
-    } catch (e) {
-      defaults = null;
-    }
+      defaults = (e.defaults as Map?)?.cast<String, String>();
+    } catch (_) {}
     try {
-      fKeys = entity.fKeys;
-    } catch (e) {
-      fKeys = null;
-    }
+      fKeys = (e.fKeys as Map?)?.cast<String, List<String>>();
+    } catch (_) {}
 
-    StringBuffer createTableStatement = StringBuffer();
-    createTableStatement
-        .write('CREATE TABLE ${entity.runtimeType.toString()} (\n');
-    Map<String, dynamic> objetToMap = entity.toMap();
-    String objectLastFieldName = objetToMap.keys.last;
-    bool hasForeignKey = fKeys != null;
+    final StringBuffer buffer = StringBuffer();
+    buffer.write('CREATE TABLE ${entity.runtimeType.toString()} (\n');
+    final Map<String, dynamic> objectMap =
+        e.toMap() as Map<String, dynamic>;
+    final String lastFieldName = objectMap.keys.last;
+    final bool hasForeignKey = fKeys != null && fKeys.isNotEmpty;
 
-    String columnType;
-    objetToMap.forEach((columnName, columnValue) {
-      //columnValue.runtimeType.toString() is a value in ['String','int','double','bool','DateTime','Uint8List']
-      // if columnValue is not null. But, if it's null then columnValue's type must be ColumnType, so columnValue.toString().split('.').last
-      // is in ['String','int','double','bool','DateTime','Uint8List'].
-      //If no default ColumnType was and columnValue is null then the generated type of this fied will be TEXT.
-
-      if (columnValue != null) {
-        columnType = columnValue is! ColumnType
-            ? columnValue.runtimeType.toString()
-            : columnValue.toString().split('.').last;
-      } else {
+    objectMap.forEach((String columnName, dynamic columnValue) {
+      // columnValue.runtimeType is one of String, int, double, bool, DateTime,
+      // Uint8List. When the value is null, the entity's toMap() puts a
+      // ColumnType enum instead, so we extract the name from the enum.
+      // If nothing suitable is found, fall back to TEXT.
+      String columnType;
+      if (columnValue == null) {
         columnType = 'String';
+      } else if (columnValue is ColumnType) {
+        columnType = columnValue.toString().split('.').last;
+      } else {
+        columnType = columnValue.runtimeType.toString();
       }
 
       if (columnType == 'bool') {
-        checks ??= {};
-        checks![columnName] = '$columnName in (0,1)';
+        checks ??= <String, String>{};
+        checks![columnName] = '$columnName IN (0, 1)';
       }
 
-      createTableStatement.write(_writeTableColumn(
-          columnName,
-          columnType == 'String'
-              ? 'TEXT'
-              : (columnType == 'int' || columnType == 'bool')
-                  ? 'INTEGER'
-                  : columnType == 'double'
-                      ? 'REAL'
-                      : columnType == 'DateTime'
-                          ? 'DATETIME'
-                          : 'BLOB',
-          pKeyAuto,
-          notNulls,
-          uniques,
-          checks,
-          defaults,
-          objectLastFieldName,
-          hasForeignKey));
+      buffer.write(_writeTableColumn(
+        columnName,
+        _sqlTypeFor(columnType),
+        pKeyAuto,
+        notNulls,
+        uniques,
+        checks,
+        defaults,
+        lastFieldName,
+        hasForeignKey,
+      ));
     });
 
     if (hasForeignKey) {
-      String lastFKeyField = fKeys.keys.last;
-      fKeys.forEach((fkField, refEntityAndField) {
-        createTableStatement.write(
-            "FOREIGN KEY($fkField) REFERENCES ${refEntityAndField.first}(${refEntityAndField[1]})${fkField != lastFKeyField ? ',\n' : '\n)'}");
+      final String lastFKeyField = fKeys.keys.last;
+      fKeys.forEach((String field, List<String> target) {
+        buffer.write(
+          'FOREIGN KEY($field) REFERENCES ${target.first}(${target[1]})'
+          '${field != lastFKeyField ? ',\n' : '\n)'}',
+        );
       });
     }
-    debugPrint("\n\n$createTableStatement");
-    return createTableStatement.toString();
+    return buffer.toString();
   }
 
-  ///Allow us to get the list of column name's of an entity table store in sqlite.<br/>
-  ///It is us to controlle if new column was added or deleted and ALTER the<br/>
-  ///corresponding entiity table for adding or deleting that column.
+  String _sqlTypeFor(String dartType) {
+    switch (dartType) {
+      case 'String':
+        return 'TEXT';
+      case 'int':
+      case 'bool':
+        return 'INTEGER';
+      case 'double':
+        return 'REAL';
+      case 'DateTime':
+        return 'DATETIME';
+      default:
+        return 'BLOB';
+    }
+  }
+
+  /// Returns the list of column names of the entity table [T] as currently
+  /// stored in SQLite. Useful to detect schema drift (columns added or
+  /// removed on the Dart side).
   Future<List<String>> getEntityColumnsName<T>() async {
-    List<Map<String, Object?>> res;
-    List<String> columnName = List.empty();
+    List<String> columns = <String>[];
     await (await db).transaction((txn) async {
-      res = await txn.rawQuery(
-          "SELECT SQL FROM sqlite_master WHERE type='table' AND name='${T.toString()}'");
-
-      if (res.isNotEmpty) {
-        List<String> columnName = (res.first['sql'] as String).split('\n');
-        columnName = columnName
-            .sublist(1, columnName.length - 1)
-            .map((colName) => colName.split(' ').first)
-            .toList();
-        columnName.removeWhere((element) => element == 'FOREIGN');
-      }
+      final List<Map<String, Object?>> res = await txn.rawQuery(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='${T.toString()}'",
+      );
+      if (res.isEmpty) return;
+      final String? createStatement = res.first['sql'] as String?;
+      if (createStatement == null) return;
+      final List<String> lines = createStatement.split('\n');
+      if (lines.length <= 2) return;
+      columns = lines
+          .sublist(1, lines.length - 1)
+          .map((String line) => line.trim().split(' ').first)
+          .where((String token) => token != 'FOREIGN')
+          .toList();
     });
-    return columnName;
+    return columns;
   }
 
-  ///returns a table column string base on getter that were define on your entities
   String _writeTableColumn(
-      String columnName,
-      String columnType,
-      MapEntry<String, bool>? pKeyAuto,
-      List<String>? notNulls,
-      List<String>? uniques,
-      Map<String, String>? checks,
-      Map<String, String>? defaults,
-      String objectLastFieldName,
-      bool haveForeignKey) {
-    StringBuffer tableColumn = StringBuffer();
-    tableColumn.write("$columnName $columnType");
+    String columnName,
+    String columnType,
+    MapEntry<String, bool>? pKeyAuto,
+    List<String>? notNulls,
+    List<String>? uniques,
+    Map<String, String>? checks,
+    Map<String, String>? defaults,
+    String objectLastFieldName,
+    bool hasForeignKey,
+  ) {
+    final StringBuffer line = StringBuffer();
+    line.write('$columnName $columnType');
 
     if (pKeyAuto != null && pKeyAuto.key == columnName) {
-      tableColumn.write(" PRIMARY KEY");
-      if (pKeyAuto.value) tableColumn.write(" AUTOINCREMENT");
+      line.write(' PRIMARY KEY');
+      if (pKeyAuto.value) line.write(' AUTOINCREMENT');
     }
 
     if (notNulls != null && notNulls.contains(columnName)) {
-      tableColumn.write(" NOT NULL");
+      line.write(' NOT NULL');
     }
 
     if (uniques != null && uniques.contains(columnName)) {
-      tableColumn.write(" UNIQUE");
+      line.write(' UNIQUE');
     }
 
     if (defaults != null && defaults.containsKey(columnName)) {
-      tableColumn.write(" DEFAULT ${defaults[columnName]}");
+      line.write(' DEFAULT ${defaults[columnName]}');
     }
 
     if (checks != null && checks.containsKey(columnName)) {
-      tableColumn.write(" CHECK(${checks[columnName]})");
+      line.write(' CHECK(${checks[columnName]})');
     }
 
-    tableColumn.write(
-        columnName != objectLastFieldName || haveForeignKey ? ",\n" : "\n)");
-    return tableColumn.toString();
+    line.write(
+      columnName != objectLastFieldName || hasForeignKey ? ',\n' : '\n)',
+    );
+    return line.toString();
   }
 
-  ///check if table already exists.
-  Future<bool> checkIfTableExists(String table) async =>
-      (await (await db).transaction((txn) async => await txn.rawQuery(
-              "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'")))
-          .isNotEmpty;
+  /// Returns `true` if a table named [table] exists.
+  Future<bool> checkIfTableExists(String table) async {
+    final List<Map<String, Object?>> rows = await (await db).transaction(
+      (txn) => txn.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='$table'",
+      ),
+    );
+    return rows.isNotEmpty;
+  }
 
-  ///check if entity table already exists.
-  Future<bool> checkIfEntityTableExists<T>() async =>
-      (await (await db).transaction((txn) async => await txn.rawQuery(
-              "SELECT name FROM sqlite_master WHERE type='table' AND name='${T.toString()}'")))
-          .isNotEmpty;
+  /// Returns `true` if the entity table [T] exists.
+  Future<bool> checkIfEntityTableExists<T>() =>
+      checkIfTableExists(T.toString());
 
-  ///Drop an entity table form the sqlite database.
-  Future<void> dropTable<T>() async => await (await db).transaction(
-      (txn) async => await txn.execute("DROP TABLE IF EXISTS ${T.toString()}"));
+  /// Drops the entity table [T] if it exists.
+  Future<void> dropTable<T>() async {
+    await (await db).transaction(
+      (txn) => txn.execute('DROP TABLE IF EXISTS ${T.toString()}'),
+    );
+  }
 
-/*  Future<void> _modifyATableStructure(
-      String tableName, String createTableString) async {
-    Database database = await db;
-    await database.transaction((txn) async {
-      txn.execute("PRAGMA writable_schema = 1");
-      txn.execute(
-          "UPDATE sqlite_master SET SQL = '$createTableString' WHERE NAME = '$tableName'");
-      txn.execute("PRAGMA writable_schema = 0");
-    });
-  }*/
-
-  /*-----------------------------------For update-------------------------------------------------*/
-  ///Use for updating one or many fied of an  entity (T) table<br/>
-  ///- The order or columns and their values must be respected<br/>
-  ///* Example:<br/>
-  ///    Using rawUpdate directely:<br/>
-  ///      int count = await database.rawUpdate('UPDATE Test SET salaire = ?, ismaried=?, year = ? WHERE name = ?',[9000000,true, 45, 'Alpha']);<br/>
-  ///    With updateSommeColumnsOf<T> method:<br/>
-  ///      bool response=await updateSommeColumnsOf<Personn>(['salaire','ismaried','year'],['name'],[1000,true, 45, 'Alpha'])<br/>
-  ///* whereMcop = whereMutliConditionOperation. This variable is use if there are many conditions to ckeck, its default value is ' and '.<br/>
-  ///Its values are in [['and','or','in','not in','exits','not exits']] etc.
-  Future<bool> updateSommeColumnsOf<T>(List<String> columnsToUpadate,
-      List<String> whereColumns, List<Object> values,
-      {String whereMcop = "and"}) async {
-    int witness = 0;
+  /// Updates one or more columns of the entity [T].
+  ///
+  /// * [columnsToUpadate]: names of the columns to update, in the order they
+  ///   appear at the start of [values].
+  /// * [whereColumns]: names of the columns appearing in the WHERE clause,
+  ///   in the order they appear at the end of [values].
+  /// * [values]: values for [columnsToUpadate] followed by values for
+  ///   [whereColumns].
+  /// * [whereMcop]: operator used to join multiple WHERE conditions.
+  ///   Defaults to `'AND'`. Any SQL boolean operator works: `'OR'`, `'AND'`.
+  ///
+  /// Example:
+  /// ```dart
+  /// final ok = await DataAccess.instance.updateSommeColumnsOf<Person>(
+  ///   ['salary', 'married', 'year'],
+  ///   ['name'],
+  ///   [9000000, true, 45, 'Alpha'],
+  /// );
+  /// ```
+  Future<bool> updateSommeColumnsOf<T>(
+    List<String> columnsToUpadate,
+    List<String> whereColumns,
+    List<Object> values, {
+    String whereMcop = 'AND',
+  }) async {
+    int affected = 0;
     await (await db).transaction((txn) async {
-      await txn
-          .rawUpdate(
-              'UPDATE ${T.toString()} SET ${_preparedColumns(columnsToUpadate, ',')} WHERE ${_preparedColumns(whereColumns, whereMcop)}',
-              _checkForBoolAndDateTime(values))
-          .then((value) {
-        witness = value;
-      }).catchError((error) {
-        debugPrint("\n\n${error.toString()}\n\n");
-      });
+      try {
+        affected = await txn.rawUpdate(
+          'UPDATE ${T.toString()} '
+          'SET ${_preparedColumns(columnsToUpadate, ',')} '
+          'WHERE ${_preparedColumns(whereColumns, whereMcop)}',
+          _checkForBoolAndDateTime(values),
+        );
+      } catch (e, s) {
+        debugPrint('updateSommeColumnsOf failed: $e\n$s');
+      }
     });
-    return witness > 0;
+    return affected > 0;
   }
 
-  /// Update all fieds of an entity object except the primary key<br/>
-  ///- The order or columns and their values must be respected<br/>
-  ///- int response = await updateWholeObject(Person(18,'M2Sir'),[["name"]],[["Alpha"]])<br/>
-  ///* whereMcop = whereMutliConditionOperation. This variable is use if there are many conditions to ckeck, its default value is ' and '.<br/>
-  ///Its values are in ['and','or','in','not in','exits','not exits']
+  /// Updates every column of an entity instance except the primary key.
+  ///
+  /// Example:
+  /// ```dart
+  /// final ok = await DataAccess.instance.updateWholeObject(
+  ///   Person(18, 'M2Sir'),
+  ///   ['name'],
+  ///   ['Alpha'],
+  /// );
+  /// ```
   Future<bool> updateWholeObject(
-      var newObject, List<String> whereColumns, List<Object> values,
-      {String whereMcop = "and"}) async {
-    int witness = 0;
+    Object newObject,
+    List<String> whereColumns,
+    List<Object> values, {
+    String whereMcop = 'AND',
+  }) async {
+    int affected = 0;
     await (await db).transaction((txn) async {
-      await txn
-          .update(newObject.runtimeType.toString(), mapToUse(newObject.toMap()),
-              where: _preparedColumns(whereColumns, whereMcop),
-              whereArgs: _checkForBoolAndDateTime(values))
-          .then((value) {
-        witness = value;
-      }).catchError((error) {
-        debugPrint("\n\n${error.toString()}\n\n");
-      });
-    });
-    return witness > 0;
-  }
-
-  ///Check for sqlite no supported type (boolean, DateTime) and correct them to be accepted.<br/>
-  ///Boolean values are convert to a value of {0,1}, DateTimes are convert to String for update operations.
-  List<Object> _checkForBoolAndDateTime(List<Object> values) =>
-      values.map((columnValue) {
-        if (columnValue is bool) {
-          return columnValue ? 1 : 0;
-        } else if (columnValue is DateTime) {
-          return columnValue.toString();
-        }
-        return columnValue;
-      }).toList();
-
-  ///Returns a prepared string of a list of columns for sql query. whereMcop = where Mutlicondition Operation
-  String _preparedColumns(List<String> whereColumns, String whereMcop) =>
-      whereColumns.map((whereColumn) => "$whereColumn= ?").join(' $whereMcop ');
-
-  ///Example:<br/>
-  ///bool witness=await deleteObjet<Test>([['email','passWord']],[['test@gmail.com','passer']])<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
-  Future<bool> delObjet<T>(List<String> whereColumns, List<Object> whereArgs,
-          {String whereMcop = "and"}) async =>
-      (await (await db).transaction((txn) async => await txn.delete(
-          T.toString(),
+      try {
+        affected = await txn.update(
+          newObject.runtimeType.toString(),
+          mapToUse((newObject as dynamic).toMap() as Map<String, dynamic>),
           where: _preparedColumns(whereColumns, whereMcop),
-          whereArgs: whereArgs))) >
-      0;
-
-  ///delete and object(s) on database base on afterWhere<br/>
-  ///bool witness=await deleteObjet<Fichier>("id=1");
-  ///Warning!!!. If afterWhere is null then the table will be truncated.<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the entity table already exists to handle this error when affecting.<br/>
-  Future<bool> deleteObjet<T>([String? afterWhere]) async =>
-      (await (await db).transaction((txn) async => await txn.rawDelete(
-          "DELETE FROM ${T.toString()} ${afterWhere != null ? "WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}" : ""}"))) >
-      0;
-
-  /// Counts the number of elements of type T or depending to expression and afterWhere condition.<br/>
-  /// - expression = [['*' ou 'DISTINCT | ALL Expression']]<br/>
-  /// Example: expression ='distinct name.<br/><br/>
-  ///This methode can throw no such table Error. <br/>
-  ///Consider using catchErr or onError methods if you are not sure that the table already exists to handle this error when affecting.<br/>
-  Future<int> countElementsOf<T>(
-      {String expression = '*', String? afterWhere}) async {
-    List<Map<String, Object?>> res = await (await db).transaction((txn) async =>
-        await txn.rawQuery(
-            "SELECT count($expression) countElement FROM ${T.toString()}${afterWhere != null ? " WHERE ${_clearAfterWhereFromBoolsAndDateTime(afterWhere)}" : ""}"));
-    return res.first['countElement'] as int;
+          whereArgs: _checkForBoolAndDateTime(values),
+        );
+      } catch (e, s) {
+        debugPrint('updateWholeObject failed: $e\n$s');
+      }
+    });
+    return affected > 0;
   }
 
+  /// Converts SQLite-incompatible values in [values] to compatible ones:
+  /// `bool` becomes `0` / `1`, `DateTime` becomes its ISO string form.
+  List<Object> _checkForBoolAndDateTime(List<Object> values) => values
+      .map((Object value) {
+        if (value is bool) return value ? 1 : 0;
+        if (value is DateTime) return value.toString();
+        return value;
+      })
+      .toList();
+
+  /// Builds a prepared parameter list of the form
+  /// `col1 = ? AND col2 = ? ...` from a list of column names.
+  String _preparedColumns(List<String> columns, String joinOperator) =>
+      columns
+          .map((String column) => '$column = ?')
+          .join(' $joinOperator ');
+
+  /// Deletes every row of [T] matching [whereColumns] / [whereArgs].
+  ///
+  /// Example:
+  /// ```dart
+  /// final ok = await DataAccess.instance.delObjet<User>(
+  ///   ['email', 'password'],
+  ///   ['test@gmail.com', 'pass'],
+  /// );
+  /// ```
+  ///
+  /// Throws [DatabaseException] if the entity table does not exist.
+  Future<bool> delObjet<T>(
+    List<String> whereColumns,
+    List<Object> whereArgs, {
+    String whereMcop = 'AND',
+  }) async {
+    final int affected = await (await db).transaction(
+      (txn) => txn.delete(
+        T.toString(),
+        where: _preparedColumns(whereColumns, whereMcop),
+        whereArgs: whereArgs,
+      ),
+    );
+    return affected > 0;
+  }
+
+  /// Deletes rows of [T] matching [afterWhere]. When [afterWhere] is null
+  /// **every row** of the table is removed (the table itself is preserved).
+  ///
+  /// Throws [DatabaseException] if the entity table does not exist.
+  Future<bool> deleteObjet<T>([String? afterWhere]) async {
+    final String whereClause =
+        afterWhere != null ? 'WHERE ${_sanitizeWhere(afterWhere)}' : '';
+    final int affected = await (await db).transaction(
+      (txn) => txn.rawDelete('DELETE FROM ${T.toString()} $whereClause'),
+    );
+    return affected > 0;
+  }
+
+  /// Counts rows of [T], optionally filtered by [afterWhere].
+  ///
+  /// * [expression]: expression passed to `COUNT(...)`; defaults to `'*'`.
+  ///   Use `'DISTINCT column'` to count distinct values of a column.
+  ///
+  /// Throws [DatabaseException] if the entity table does not exist.
+  Future<int> countElementsOf<T>({
+    String expression = '*',
+    String? afterWhere,
+  }) async {
+    final String whereClause =
+        afterWhere != null ? ' WHERE ${_sanitizeWhere(afterWhere)}' : '';
+    final List<Map<String, Object?>> rows = await (await db).transaction(
+      (txn) => txn.rawQuery(
+        'SELECT count($expression) AS countElement '
+        'FROM ${T.toString()}$whereClause',
+      ),
+    );
+    return (rows.first['countElement'] as int?) ?? 0;
+  }
+
+  /// Removes every row from every user-defined table of the database.
+  /// The tables themselves are kept.
   Future<void> cleanAllTablesData() async {
-    await DataAccess.instance
-        .getAColumnFromWithTableName<String>('name', 'sqlite_master',
-            afterWhere: "type='table'")
-        .then((tables) async {
-      await (await db).transaction((txn) async {
-        for (String table in tables) {
-          await txn.execute("DELETE FROM $table");
-        }
-      });
+    final List<String> tables = await getAColumnFromWithTableName<String>(
+      'name',
+      'sqlite_master',
+      afterWhere: "type='table' AND name NOT LIKE 'sqlite_%'",
+    );
+    await (await db).transaction((txn) async {
+      for (final String table in tables) {
+        await txn.execute('DELETE FROM $table');
+      }
     });
   }
 }
 
-///Use when we want to convert an entity to a map for database insertion or is it like a normal Map in our code.<br/>
-///By default, forDB is set to true because the method is use by the package for inserting enties data.<br/>
-///into their corresponding tables. <br/><br/>
-///Set, forDB to false if it's not for database insertion.
-Map<String, dynamic> mapToUse(Map<String, dynamic> objetToMap,
-    {bool forDB = true}) {
-  return objetToMap.map((key, value) {
-    if (value is ColumnType) {
-      return MapEntry(key, null);
-    } else if (value is bool && forDB) {
-      return MapEntry(key, value ? 1 : 0);
-    } else if (value is DateTime && forDB) {
-      return MapEntry(key, value.toString());
-    }
-
+/// Converts an entity map into a map suitable for SQLite.
+///
+/// * Values still equal to a [ColumnType] enum are replaced with `null`
+///   (so they can be stored as SQL NULL).
+/// * When [forDB] is true (the default), `bool` values are coerced to `0`/`1`
+///   and `DateTime` values to their string representation.
+///
+/// Pass `forDB: false` when you want a plain Dart map (e.g. to serialize to
+/// JSON or display it in the UI).
+Map<String, dynamic> mapToUse(
+  Map<String, dynamic> objectMap, {
+  bool forDB = true,
+}) {
+  return objectMap.map((String key, dynamic value) {
+    if (value is ColumnType) return MapEntry(key, null);
+    if (forDB && value is bool) return MapEntry(key, value ? 1 : 0);
+    if (forDB && value is DateTime) return MapEntry(key, value.toString());
     return MapEntry(key, value);
   });
 }
 
-extension ExtraUsefullFunctionExtension on String {
+/// Convenient [String] helpers used by the package.
+extension B012StringHelpers on String {
+  /// Inserts a thin space every three digits in a numeric string.
+  ///
+  /// Example: `'1234567'.spacedNumbers` returns `'1 234 567'`.
   String get spacedNumbers => replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]} ');
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (Match m) => '${m[1]} ',
+      );
 }
 
+/// Generates an integer sequence, similar to Python's `range`.
 ///
+/// * `range(n)` returns `0 .. n-1`.
+/// * `range(start, end)` returns `start .. end-1`. When `end < start`, the
+///   bounds are automatically swapped so the result is never empty.
 Iterable<int> range(int lenOrStart, [int? end]) {
-  int tmp;
-  if (end != null && end < lenOrStart) {
-    tmp = end;
-    end = lenOrStart;
-    lenOrStart = tmp;
+  if (end == null) {
+    return Iterable<int>.generate(lenOrStart, (int index) => index);
   }
-  return end == null
-      ? Iterable.generate(lenOrStart, (index) => index)
-      : Iterable.generate(end - lenOrStart, (index) => lenOrStart++);
+  int start = lenOrStart;
+  int stop = end;
+  if (stop < start) {
+    final int tmp = start;
+    start = stop;
+    stop = tmp;
+  }
+  final int length = stop - start;
+  return Iterable<int>.generate(length, (int index) => start + index);
 }
 
-///getter than returns a key of 32 random characters of numerics,majuscules and minuscules
+/// Returns a 32-character random key made of digits, lowercase and uppercase
+/// Latin letters. Handy for generating string-typed primary keys.
 String get newKey {
-  Random rng = Random();
-  String numericsAndChars =
-      "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  StringBuffer key = StringBuffer();
+  const String alphabet =
+      '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  final Random rng = Random.secure();
+  final StringBuffer buffer = StringBuffer();
   for (int i = 0; i < 32; i++) {
-    key.write(numericsAndChars[rng.nextInt(62)]);
+    buffer.write(alphabet[rng.nextInt(alphabet.length)]);
   }
-  return key.toString();
+  return buffer.toString();
 }
 
-///Dart's primitive types. User at the moment that the package create an entity's table on sqlite database.<br/>
-///It's use when never the corresponding the correspondinf field is null to determine the type of the column
+/// Primitive Dart types known by [DataAccess.showCreateTable].
+///
+/// When a column value is `null` in an entity's `toMap()`, the entity uses
+/// one of these constants to tell the package which SQL column type to
+/// generate for that column.
+// ignore: constant_identifier_names
 enum ColumnType { int, double, String, bool, DateTime, Uint8List }
 
-////prend [(1 ou 0) ou (true ou false)] et return respectivement [(true ou false) ou (1 ou 0)]
-dynamic boolean(var intOrBool, {bool isInt = true}) {
-  if (intOrBool != null) return isInt ? intOrBool > 0 : intOrBool;
-  return null;
+/// Normalizes a SQLite boolean value.
+///
+/// * When [isInt] is true, [intOrBool] is expected to be `0`/`1` and a
+///   corresponding `bool` is returned.
+/// * When [isInt] is false, [intOrBool] is returned as is.
+/// * `null` is passed through.
+dynamic boolean(dynamic intOrBool, {bool isInt = true}) {
+  if (intOrBool == null) return null;
+  if (isInt) return (intOrBool as num) > 0;
+  return intOrBool as bool;
 }
 
-///permet de convertir une date (String) issu de la base de donnees sqflite en DateTime
-DateTime? dateTime(String? dateString) =>
-    dateString != null ? DateTime.parse(dateString) : null;
+/// Parses a SQLite DATETIME string into a [DateTime].
+/// Returns `null` when [dateString] is `null` or empty.
+DateTime? dateTime(String? dateString) {
+  if (dateString == null || dateString.isEmpty) return null;
+  return DateTime.tryParse(dateString);
+}

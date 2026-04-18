@@ -1,6 +1,10 @@
 # b012_data
 
-`b012_data` is a Flutter package focused on **data manipulation**:
+`b012_data` is a Flutter package focused on **data manipulation**, inspired by
+the **Spring Boot** framework: declare a plain Dart class as an entity and the
+package automatically generates every **CRUD** operation (create, read, update,
+delete) on your local SQLite database — no hand-written SQL, no boilerplate
+repository.
 
 * Object persistence on a local **SQLite** database, via `DataAccess.instance`.
 * File system helpers (read, write, append, check, delete, load binary files as images, audios, videos and so on), via `DiscData.instance`.
@@ -23,7 +27,7 @@ Add the package to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  b012_data: ^2.0.0
+  b012_data: ^2.0.2
 ```
 
 Then run:
@@ -241,8 +245,18 @@ Future<void> fileExample() async {
 
 ## Full worked example
 
-See the [`example/`](example) folder for a complete runnable example that
-combines the database and the file-system APIs.
+The [`example/`](example) folder splits the two concerns into self-contained,
+runnable files so each API can be explored in isolation:
+
+* [`example/sqlite_example.dart`](example/sqlite_example.dart) — SQLite CRUD
+  demo built around the `Person` entity and `DataAccess.instance`.
+  Run it alone with `flutter run -t example/sqlite_example.dart`.
+* [`example/disc_example.dart`](example/disc_example.dart) — File system /
+  binary file demo (text, Base64, raw bytes, `Image`) built around
+  `DiscData.instance` and the `Images` entity.
+  Run it alone with `flutter run -t example/disc_example.dart`.
+* [`example/main.dart`](example/main.dart) — Entry point that runs both
+  demos in sequence.
 
 ---
 

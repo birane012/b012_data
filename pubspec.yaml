@@ -1,6 +1,6 @@
 name: b012_data
-description: A very easy to use Flutter package to build, generate and manipulate data. It provides easy SQLite persistence and file-system helpers for Android, iOS, Linux, macOS and Windows.
-version: 2.0.0
+description: Spring Boot-inspired Flutter package with auto-generated SQLite CRUD for your entities, plus binary file helpers (images, audio, video). Android, iOS, Linux, macOS, Windows.
+version: 2.0.2
 homepage: https://birane012.github.io
 repository: https://github.com/birane012/b012_data.git
 

@@ -1,10 +1,43 @@
+## 2.0.2
+
+* Documented the Spring Boot inspiration and the automatic CRUD generation
+  at the top of `README.md`, so the core value proposition is visible at
+  first glance.
+* Rewrote the `pubspec.yaml` description to surface the package when
+  developers search pub.dev for Spring Boot, SQLite CRUD or binary file
+  manipulation (images, audio, video).
+* Split the example into two self-contained, runnable files with their
+  own `main`: `example/sqlite_example.dart` (SQLite CRUD walk-through
+  around the `Person` entity) and `example/disc_example.dart` (binary
+  file / file system walk-through around the `Images` entity).
+  `example/main.dart` now orchestrates both demos in sequence and the
+  `README.md` documents how to run each one in isolation.
+* Aligned the `Person` entity with the numbered `Required` / `Optional`
+  steps used in the `README.md`, so both sources tell the exact same
+  story.
+* Fixed the `Installation` section of `README.md`, which still pointed at
+  an older version constraint.
+
+## 2.0.1
+
+* Broadened SDK constraint to `>=2.12.0 <4.0.0` (Flutter `>=2.0.0`) so the
+  package installs on older null-safe Flutter projects.
+* Loosened dependency ranges on `sqflite`, `sqflite_common_ffi` and
+  `path_provider` to `>=2.0.0 <3.0.0`.
+* Added an explicit `import 'package:sqflite/sqflite.dart';` so the package
+  still resolves `Database`, `DatabaseFactory` and `databaseFactory` when
+  the lowest allowed `sqflite_common_ffi` is selected (fixes pub.dev
+  "dependency constraint lower bounds" downgrade analysis).
+* Replaced `Enum.name` (Dart 2.15+) with `toString().split('.').last` so
+  the library runs on Dart 2.12.
+
 ## 2.0.0
 
 Major maintenance release. **The public API is kept backwards-compatible
 with 1.x** — no method renames. Update your `pubspec.yaml` and you're done.
 
 ### Requirements
-* Minimum SDK bumped to Dart `>=3.4.0` and Flutter `>=3.22.0`.
+* Minimum SDK Dart `>=3.4.0` and Flutter `>=3.22.0` (lowered in 2.0.1).
 
 ### Fixes
 * `changeDB` was using the native `sqflite` backend on Windows instead of

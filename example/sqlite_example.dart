@@ -163,7 +163,7 @@ Future<void> runSqliteDemo() async {
   );
   debugPrint('Total rows: $total, male rows: $males\n');
 
-  // Attention: The following instruction drops every table in the easy_ database (tables stay, rows are removed).
+  // Attention: The following instruction drops every table in the sqlf_easy.db database (tables stay, rows are removed).
   // await DataAccess.instance.cleanAllTablesData();
 
   // Things to know:

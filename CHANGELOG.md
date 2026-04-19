@@ -3,6 +3,7 @@
 * Added the `static_and_variables.dart` file with a base64 image used for illustration in `disc_example.dart`.
 * Provided a more explicit use case of the method `getEntityFileOnDisc` in `disc_example.dart`.
 * Rearranged example for clearer use.
+* Rewrite readme.md file
 
 ## 2.0.2
 

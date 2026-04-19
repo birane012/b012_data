@@ -257,7 +257,7 @@ class DataAccess {
   }) async {
     try {
       final List<Map<String, Object?>> rows =
-          await getSommeColumnsFrom<T>(columnName, afterWhere: afterWhere);
+          await getSomeColumnsFrom<T>(columnName, afterWhere: afterWhere);
       return rows
           .map((Map<String, Object?> row) => row[columnName] as C)
           .toList();
@@ -307,11 +307,11 @@ class DataAccess {
   /// Example:
   /// ```dart
   /// final rows = await DataAccess.instance
-  ///     .getSommeColumnsFrom<Person>('firstName, lastName', afterWhere: 'id=1');
+  ///     .getSomeColumnsFrom<Person>('firstName, lastName', afterWhere: 'id=1');
   /// ```
   ///
   /// Throws [DatabaseException] if the entity table does not exist.
-  Future<List<Map<String, Object?>>> getSommeColumnsFrom<T>(
+  Future<List<Map<String, Object?>>> getSomeColumnsFrom<T>(
     String listDesColonne, {
     String? afterWhere,
   }) async {
@@ -324,7 +324,7 @@ class DataAccess {
     );
   }
 
-  /// Like [getSommeColumnsFrom] but takes an arbitrary [table] name (or a join
+  /// Like [getSomeColumnsFrom] but takes an arbitrary [table] name (or a join
   /// expression). Useful for non-entity tables or join queries.
   Future<List<Map<String, Object?>>> getSommeColumnsWithTableName(
     String listDesColonne,

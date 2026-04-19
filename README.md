@@ -194,11 +194,11 @@ Future<void> runSqliteDemo() async {
 
   // READ (projection) — pull several columns at once.
   final List<Map<String, Object?>> nameRows = await DataAccess.instance
-      .getSommeColumnsFrom<Person>('firstName, lastName');
+      .updateSomeColumnsOf<Person>('firstName, lastName');
   debugPrint('First + last names: $nameRows\n');
 
   final List<Map<String, Object?>> womenNameRows =
-      await DataAccess.instance.getSommeColumnsFrom<Person>(
+      await DataAccess.instance.updateSomeColumnsOf<Person>(
     'firstName, lastName',
     afterWhere: 'sex = 0',
   );

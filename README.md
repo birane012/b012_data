@@ -48,13 +48,13 @@ import 'sqlite_example.dart' as sqlite;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // ... your app here. 
+  // ... your app here, like below.
   
   // SQLite CRUD walk-through (Person entity).
-  await runSqliteDemo();
+  await sqlite.runSqliteDemo();
 
   // File system / binary file walk-through (Images entity).
-  await runDiscDemo();
+  await disc.runDiscDemo();
 }
 ```
 

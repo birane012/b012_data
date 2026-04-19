@@ -1,3 +1,9 @@
+## 2.0.3
+
+* Added the `static_and_variables.dart` file with a base64 image used for illustration in `disc_example.dart`.
+* Provided a more explicit use case of the method `getEntityFileOnDisc` in `disc_example.dart`.
+* Rearranged example for clearer use.
+
 ## 2.0.2
 
 * Documented the Spring Boot inspiration and the automatic CRUD generation

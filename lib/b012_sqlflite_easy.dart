@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 // ignore: unnecessary_import
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-
 import 'package:b012_data/b012_disc_data.dart';
 
 /// High-level API for persisting Dart objects into a local SQLite database.
@@ -218,8 +217,8 @@ class DataAccess {
   ///
   /// Throws [DatabaseException] if the entity table does not exist.
   Future<List<T>?> getAll<T>(Object tableEntityInstance) async {
-    final List<Map<String, Object?>> rows = await (await db)
-        .transaction((txn) => txn.query(T.toString()));
+    final List<Map<String, Object?>> rows =
+        await (await db).transaction((txn) => txn.query(T.toString()));
     if (rows.isEmpty) return null;
     return rows
         .map((Map<String, Object?> row) =>
@@ -259,7 +258,9 @@ class DataAccess {
     try {
       final List<Map<String, Object?>> rows =
           await getSommeColumnsFrom<T>(columnName, afterWhere: afterWhere);
-      return rows.map((Map<String, Object?> row) => row[columnName] as C).toList();
+      return rows
+          .map((Map<String, Object?> row) => row[columnName] as C)
+          .toList();
     } catch (e, s) {
       debugPrint('getAColumnFrom failed: $e\n$s');
       return <C>[];
@@ -285,12 +286,15 @@ class DataAccess {
     String? afterWhere,
   }) async {
     try {
-      final List<Map<String, Object?>> rows = await getSommeColumnsWithTableName(
+      final List<Map<String, Object?>> rows =
+          await getSommeColumnsWithTableName(
         columnName,
         table,
         afterWhere: afterWhere,
       );
-      return rows.map((Map<String, Object?> row) => row[columnName] as T).toList();
+      return rows
+          .map((Map<String, Object?> row) => row[columnName] as T)
+          .toList();
     } catch (e, s) {
       debugPrint('getAColumnFromWithTableName failed: $e\n$s');
       return <T>[];
@@ -338,8 +342,7 @@ class DataAccess {
   Future<void> createTableIfNotExists(Object entity) async {
     final String tableName = entity.runtimeType.toString();
     if (await checkIfTableExists(tableName)) return;
-    await (await db)
-        .transaction((txn) => txn.execute(showCreateTable(entity)));
+    await (await db).transaction((txn) => txn.execute(showCreateTable(entity)));
   }
 
   /// Returns the `CREATE TABLE` statement generated for [entity] based on the
@@ -376,8 +379,7 @@ class DataAccess {
 
     final StringBuffer buffer = StringBuffer();
     buffer.write('CREATE TABLE ${entity.runtimeType.toString()} (\n');
-    final Map<String, dynamic> objectMap =
-        e.toMap() as Map<String, dynamic>;
+    final Map<String, dynamic> objectMap = e.toMap() as Map<String, dynamic>;
     final String lastFieldName = objectMap.keys.last;
     final bool hasForeignKey = fKeys != null && fKeys.isNotEmpty;
 
@@ -539,13 +541,13 @@ class DataAccess {
   ///
   /// Example:
   /// ```dart
-  /// final ok = await DataAccess.instance.updateSommeColumnsOf<Person>(
+  /// final ok = await DataAccess.instance.updateSomeColumnsOf<Person>(
   ///   ['salary', 'married', 'year'],
   ///   ['name'],
   ///   [9000000, true, 45, 'Alpha'],
   /// );
   /// ```
-  Future<bool> updateSommeColumnsOf<T>(
+  Future<bool> updateSomeColumnsOf<T>(
     List<String> columnsToUpadate,
     List<String> whereColumns,
     List<Object> values, {
@@ -561,7 +563,7 @@ class DataAccess {
           _checkForBoolAndDateTime(values),
         );
       } catch (e, s) {
-        debugPrint('updateSommeColumnsOf failed: $e\n$s');
+        debugPrint('updateSomeColumnsOf failed: $e\n$s');
       }
     });
     return affected > 0;
@@ -601,20 +603,17 @@ class DataAccess {
 
   /// Converts SQLite-incompatible values in [values] to compatible ones:
   /// `bool` becomes `0` / `1`, `DateTime` becomes its ISO string form.
-  List<Object> _checkForBoolAndDateTime(List<Object> values) => values
-      .map((Object value) {
+  List<Object> _checkForBoolAndDateTime(List<Object> values) =>
+      values.map((Object value) {
         if (value is bool) return value ? 1 : 0;
         if (value is DateTime) return value.toString();
         return value;
-      })
-      .toList();
+      }).toList();
 
   /// Builds a prepared parameter list of the form
   /// `col1 = ? AND col2 = ? ...` from a list of column names.
   String _preparedColumns(List<String> columns, String joinOperator) =>
-      columns
-          .map((String column) => '$column = ?')
-          .join(' $joinOperator ');
+      columns.map((String column) => '$column = ?').join(' $joinOperator ');
 
   /// Deletes every row of [T] matching [whereColumns] / [whereArgs].
   ///

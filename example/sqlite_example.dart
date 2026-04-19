@@ -77,92 +77,100 @@ class Person {
 /// repository method — no SQL string is ever written by hand.
 Future<void> runSqliteDemo() async {
   // Inspect the CREATE TABLE statement generated for the Person entity.
-  debugPrint(DataAccess.instance.showCreateTable(Person()));
+  debugPrint('${DataAccess.instance.showCreateTable(Person())}\n\n');
 
   // Does the Person table already exist in the database?
   final bool personTableExists =
       await DataAccess.instance.checkIfEntityTableExists<Person>();
-  debugPrint('Person table exists? $personTableExists');
+  debugPrint('Person table exists? $personTableExists\n');
 
   // CREATE — insert a single Person row.
   final bool inserted = await DataAccess.instance.insertObjet(
     Person(newKey, 'KEBE', 'Birane', true, DateTime(2000, 8, 5)),
   );
-  debugPrint('Single insert ok? $inserted');
+  debugPrint('Single insert ok? $inserted\n');
 
   // CREATE (bulk) — insert several Persons inside a single transaction.
-  final bool bulkInserted = await DataAccess.instance.insertObjetList(<Person>[
+  final bool personsListInserted =
+      await DataAccess.instance.insertObjetList(<Person>[
     Person(newKey, 'Mbaye', 'Aliou', true, DateTime(1999, 5, 1)),
     Person(newKey, 'Cisse', 'Fatou', false, DateTime(2000, 7, 9)),
   ]);
-  debugPrint('Bulk insert ok? $bulkInserted');
+  debugPrint('Bulk insert ok? $personsListInserted\n');
 
   // READ — fetch a single row matching an SQL predicate.
-  final Person? birane = await DataAccess.instance
-      .get<Person>(Person(), "firstName = 'Birane' AND lastName = 'KEBE'");
-  debugPrint('Found Birane? ${birane != null}');
+  final Person? birane = await DataAccess.instance.get<Person>(
+    Person(),
+    "firstName = 'Birane' AND lastName = 'KEBE'",
+  );
+  debugPrint('Found Birane? ${birane != null}\n');
 
   // READ — fetch every row.
-  final List<Person>? everyone =
-      await DataAccess.instance.getAll<Person>(Person());
-  debugPrint('Total persons: ${everyone?.length ?? 0}');
+  final List<Person>? everyone = await DataAccess.instance.getAll<Person>(
+    Person(),
+  );
+  debugPrint('Total persons: ${everyone?.length ?? 0}\n');
 
   // READ — fetch rows matching a predicate. Booleans are automatically
   // converted to 0/1 for SQLite, so `sex = true` is equivalent to `sex = 1`.
-  final List<Person>? men =
-      await DataAccess.instance.getAllSorted<Person>(Person(), 'sex = true');
-  debugPrint('Men: ${men?.length ?? 0}');
+  final List<Person>? men = await DataAccess.instance.getAllSorted<Person>(
+    Person(),
+    'sex = true',
+  );
+  debugPrint('Men: ${men?.length ?? 0}\n');
 
   // READ (projection) — pull a single column across the whole table.
   final List<String> firstNames =
       await DataAccess.instance.getAColumnFrom<String, Person>('firstName');
-  debugPrint('First names: $firstNames');
+  debugPrint('First names: $firstNames\n');
 
   final List<String> womenFirstNames = await DataAccess.instance
       .getAColumnFrom<String, Person>('firstName', afterWhere: 'sex = false');
-  debugPrint('Women first names: $womenFirstNames');
+  debugPrint('Women first names: $womenFirstNames\n');
 
   // READ (projection) — pull several columns at once.
   final List<Map<String, Object?>> nameRows = await DataAccess.instance
       .getSommeColumnsFrom<Person>('firstName, lastName');
-  debugPrint('First + last names: $nameRows');
+  debugPrint('First + last names: $nameRows\n');
 
   final List<Map<String, Object?>> womenNameRows =
       await DataAccess.instance.getSommeColumnsFrom<Person>(
     'firstName, lastName',
     afterWhere: 'sex = 0',
   );
-  debugPrint('Women first + last names: $womenNameRows');
+  debugPrint('Women first + last names: $womenNameRows\n');
 
   // UPDATE — values follow the order `columnsToUpadate` + `whereColumns`.
   // Here: set `firstName = 'developer'` and `lastName = '2022'` where
   // `firstName = 'Birane' AND lastName = 'KEBE'`.
-  final bool updated = await DataAccess.instance.updateSommeColumnsOf<Person>(
+  final bool updated = await DataAccess.instance.updateSomeColumnsOf<Person>(
     <String>['firstName', 'lastName'],
     <String>['firstName', 'lastName'],
     <Object>['developer', '2022', 'Birane', 'KEBE'],
   );
-  debugPrint('Update ok? $updated');
+  debugPrint('Update ok? $updated\n');
 
   // DELETE — remove every row matching the predicate.
-  final bool deletedFatou = await DataAccess.instance
-      .deleteObjet<Person>("firstName = 'Fatou'");
-  debugPrint('Fatou deleted? $deletedFatou');
+  final bool deletedFatou = await DataAccess.instance.deleteObjet<Person>(
+    "firstName = 'Fatou'",
+  );
+  debugPrint('Fatou deleted? $deletedFatou\n');
 
   // COUNT — total rows and filtered rows.
   final int total = await DataAccess.instance.countElementsOf<Person>();
-  final int males = await DataAccess.instance
-      .countElementsOf<Person>(afterWhere: 'sex = true');
-  debugPrint('Total rows: $total, male rows: $males');
+  final int males = await DataAccess.instance.countElementsOf<Person>(
+    afterWhere: 'sex = true',
+  );
+  debugPrint('Total rows: $total, male rows: $males\n');
 
-  // TRUNCATE — wipe every user-defined table (tables stay, rows are removed).
+  // Attention: The following instruction drops every table in the easy_ database (tables stay, rows are removed).
   // await DataAccess.instance.cleanAllTablesData();
 
   // Things to know:
   // 1. Most entity-oriented methods throw
   //    `DatabaseException('no such table: ...')` when the underlying table
   //    does not exist. The exceptions are `updateWholeObject`,
-  //    `updateSommeColumnsOf`, `getAColumnFromWithTableName` and
+  //    `updateSomeColumnsOf`, `getAColumnFromWithTableName` and
   //    `getAColumnFrom`, which catch the error and only log it via
   //    `debugPrint`. Wrap the other methods in `try` / `catch` if you are
   //    not sure the table already exists.
@@ -175,10 +183,14 @@ Future<void> runSqliteDemo() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // SQLite CRUD walk-through (Person entity).
   await runSqliteDemo();
-  runApp(const MaterialApp(
-    home: Scaffold(
-      body: Center(child: Text('b012_data — SQLite CRUD demo')),
+
+  runApp(
+    const MaterialApp(
+      home:
+          Scaffold(body: Center(child: Text('runSqliteDemo tests completed'))),
     ),
-  ));
+  );
 }

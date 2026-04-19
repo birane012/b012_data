@@ -27,7 +27,7 @@ Add the package to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  b012_data: ^2.0.2
+  b012_data: ^2.0.3
 ```
 
 Then run:
@@ -35,6 +35,8 @@ Then run:
 ```sh
 flutter pub get
 ```
+
+**Important note:** As soon as `b012_data` is imported in your code, a default database named `sqlf_easy.db` is automatically created in the application's documents directory specially in the databases folder. You can use the changeDB method if you don't want to use this one.
 
 Before calling any method that needs the application documents directory
 (`databasesPath`, `filesPath`, etc.), make sure the Flutter bindings are

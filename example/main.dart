@@ -14,7 +14,6 @@
 // -----------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
-
 import 'disc_example.dart' as disc;
 import 'sqlite_example.dart' as sqlite;
 
@@ -27,7 +26,9 @@ Future<void> main() async {
   // 2. File system / binary file walk-through (Images entity).
   await disc.runDiscDemo();
 
-  runApp(const MaterialApp(
-    home: Scaffold(body: Center(child: Text('b012_data'))),
-  ));
+  runApp(
+    const MaterialApp(
+      home: Scaffold(body: Center(child: Text('b012_data tests completed'))),
+    ),
+  );
 }

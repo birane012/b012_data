@@ -2,6 +2,7 @@
 // must keep passing in 2.1: a failure means a break for current users.
 import 'dart:io';
 
+import 'package:b012_data/b012_disc_data.dart';
 import 'package:b012_data/b012_sqlflite_easy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -321,24 +322,24 @@ void main() {
     test(
       'changeDB switches the application database and remembers it',
       () async {
-        final String databases =
-            '${Directory.current.path}${Platform.pathSeparator}databases';
-        Directory(databases).createSync(recursive: true);
+        await da.changeDB('other');
+        final String path = (await da.db).path;
+        expect(path, endsWith('other.db'));
+        // Exception (2.1, spec §5.4): the name is remembered in the
+        // application's own databases folder, no longer in a folder shared
+        // by every application of the computer.
+        final File pointer = File(
+          '${await DiscData.instance.databasesPath}'
+          '${Platform.pathSeparator}dbName',
+        );
         try {
-          await da.changeDB('other');
-          expect((await da.db).path, endsWith('other.db'));
-          expect(
-            File(
-              '$databases${Platform.pathSeparator}dbName',
-            ).readAsStringSync(),
-            'other.db',
-          );
+          expect(pointer.readAsStringSync(), 'other.db');
           await da.closeDB();
-          expect((await da.db).path, endsWith('other.db'));
+          expect((await da.db).path, path);
         } finally {
           await da.closeDB();
-          await da.dropDB('other.db');
-          Directory(databases).deleteSync(recursive: true);
+          await da.dropDB(path);
+          if (pointer.existsSync()) pointer.deleteSync();
         }
       },
     );

@@ -51,4 +51,10 @@ abstract class Backend {
 
   /// Deletes the database file at [path].
   Future<void> delete(String path);
+
+  /// The application database name remembered by `changeDB`, if any.
+  Future<String?> readPointer();
+
+  /// Remembers [name] as the application database.
+  Future<void> writePointer(String name);
 }

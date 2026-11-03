@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:b012_data/b012_sqlflite_easy.dart';
 
+import 'src/native/atomic_file.dart';
+import 'src/native/locations.dart';
 import 'src/sql.dart' show columnRef;
 
 /// Describes the kind of data stored in / read from a file on disk.
@@ -26,6 +29,10 @@ enum DataType {
 /// per-platform differences (path separators, default root directory,
 /// hidden-directory conventions, ...).
 ///
+/// Files are read and written asynchronously; a file is written all at once
+/// (a reader never sees half of it), and a file *name* can never point
+/// outside [filesPath].
+///
 /// Access the singleton through [DiscData.instance].
 class DiscData {
   DiscData._internal();
@@ -33,49 +40,37 @@ class DiscData {
   /// Global singleton instance.
   static final DiscData instance = DiscData._internal();
 
-  String? _rootPath;
-  String? _databasesPath;
-  String? _filesPath;
-
   /// Platform path separator (`'\'` on Windows, `'/'` elsewhere).
-  final String pathJoin = Platform.isWindows ? r'\' : '/';
-
-  /// Default directory name where files saved without an explicit path are
-  /// stored.
-  ///
-  /// On Windows the user has direct access to the folder, so the directory
-  /// is prefixed with a dot (`.files`) to discourage accidental deletion.
-  final String _defaultFilesDirectory = Platform.isWindows ? '.files' : 'files';
+  final String pathJoin = !kIsWeb && Platform.isWindows ? r'\' : '/';
 
   /// Root directory for the current application. Equivalent to
   /// `getApplicationDocumentsDirectory().path`.
-  Future<String> get rootPath async {
-    _rootPath ??= (await getApplicationDocumentsDirectory()).path;
-    return _rootPath!;
-  }
+  Future<String> get rootPath => Locations.instance.documentsDir;
 
-  /// Directory where SQLite database files are stored.
+  /// Directory holding the `dbName` file of [DataAccess.changeDB].
   ///
-  /// The directory is **not** created on disk automatically - create it from
-  /// the client code if you want to make sure it exists before writing.
-  Future<String> get databasesPath async {
-    _databasesPath ??= '${getParentDir(await rootPath)}${pathJoin}databases';
-    return _databasesPath!;
-  }
+  /// * Android, iOS, macOS: `<parent of Documents>/databases`, as before.
+  /// * Windows, Linux: `<application support>/databases`, where the
+  ///   databases of a new installation live too.
+  Future<String> get databasesPath => Locations.instance.databasesDir;
 
   /// Directory used to store user-facing files saved by the package.
-  Future<String> get filesPath async {
-    _filesPath ??=
-        '${getParentDir(await rootPath)}$pathJoin$_defaultFilesDirectory';
-    return _filesPath!;
-  }
+  ///
+  /// * Android, iOS, macOS: `<parent of Documents>/files`, as before.
+  /// * Windows, Linux: `<application support>/files` for a new installation;
+  ///   an application that kept its 2.0.3 database keeps its 2.0.3 folder
+  ///   (`<parent of Documents>/.files` on Windows, `files` on Linux). Files
+  ///   saved there by 2.0.3 remain readable by name either way.
+  Future<String> get filesPath => Locations.instance.filesDir;
+
+  /// Forgets the cached folders (tests only).
+  @visibleForTesting
+  void debugResetPaths() => Locations.instance.reset();
 
   /// Returns `true` if the file identified by [fileName] (relative to
   /// [filesPath]) or by the absolute [path] exists on disk.
-  Future<bool> checkFileExists({String? fileName, String? path}) async {
-    final String resolved = await _resolvePath(fileName, path);
-    return File(resolved).existsSync();
-  }
+  Future<bool> checkFileExists({String? fileName, String? path}) async =>
+      (await _existing(fileName, path)).exists();
 
   /// Returns the parent directory of [path], computed by stripping the last
   /// component from the path.
@@ -90,16 +85,19 @@ class DiscData {
   /// Writes [data] to disk.
   ///
   /// * If [path] is provided, the data is written to that absolute path and
-  ///   the file name is derived from it.
-  /// * Otherwise, the file is created inside [filesPath] using
-  ///   [takeThisName] as its name, or the current timestamp when
-  ///   [takeThisName] is null.
+  ///   the file name is derived from it. When [recursive] is `true`, any
+  ///   missing parent directory is created; otherwise a
+  ///   [FileSystemException] is thrown if the parent directory does not
+  ///   exist.
+  /// * Otherwise, the file is created inside [filesPath] (created if needed)
+  ///   using [takeThisName] as its name, or the current timestamp when
+  ///   [takeThisName] is null. A name that would leave [filesPath] (such as
+  ///   `../x`) throws an [ArgumentError].
   /// * [dataType] drives how [data] is serialised: `DataType.text` treats it
   ///   as a `String`, `DataType.base64` decodes it and stores the decoded
   ///   bytes, `DataType.bytes` stores it as a `Uint8List`.
-  /// * When [recursive] is `true`, any missing parent directory is created;
-  ///   otherwise a [FileSystemException] is thrown if the parent directory
-  ///   does not exist.
+  /// * The file is written all at once: a reader sees the old content or the
+  ///   new one, never half of it.
   ///
   /// Returns the file name actually used, or `null` when [data] is null /
   /// empty.
@@ -121,24 +119,23 @@ class DiscData {
       fileName = takeThisName ?? DateTime.now().toIso8601String();
     }
 
-    if (Platform.isWindows) fileName = fileName.replaceAll(':', '');
+    if (!kIsWeb && Platform.isWindows) fileName = fileName.replaceAll(':', '');
 
-    final String resolved =
-        validatePath(path) ?? '${await filesPath}$pathJoin$fileName';
-    final File file = File(resolved);
-    file.createSync(recursive: recursive);
-
-    switch (dataType) {
-      case DataType.text:
-        file.writeAsStringSync(data as String);
-        break;
-      case DataType.base64:
-        file.writeAsBytesSync(base64Decode(data as String));
-        break;
-      case DataType.bytes:
-        file.writeAsBytesSync(data as Uint8List);
-        break;
+    final File file;
+    final String? validated = validatePath(path);
+    if (validated != null) {
+      file = File(validated);
+      if (!recursive && !await file.parent.exists()) {
+        throw PathNotFoundException(
+          validated,
+          const OSError('The parent directory does not exist'),
+          'Cannot create file',
+        );
+      }
+    } else {
+      file = File(_inFolder(await filesPath, fileName));
     }
+    await writeAtomically(file, _bytesOf(data, dataType));
     return fileName;
   }
 
@@ -161,24 +158,13 @@ class DiscData {
     if (data is String && data.isEmpty) return;
     if (data is List && data.isEmpty) return;
 
-    final String resolved = await _resolvePath(fileName, path);
-    final File file = File(resolved);
-    if (!file.existsSync()) return;
-
-    switch (dataType) {
-      case DataType.text:
-        file.writeAsStringSync(data as String, mode: FileMode.append);
-        break;
-      case DataType.base64:
-        file.writeAsBytesSync(
-          base64Decode(data as String),
-          mode: FileMode.append,
-        );
-        break;
-      case DataType.bytes:
-        file.writeAsBytesSync(data as Uint8List, mode: FileMode.append);
-        break;
-    }
+    final File file = await _existing(fileName, path);
+    if (!await file.exists()) return;
+    await file.writeAsBytes(
+      _bytesOf(data, dataType),
+      mode: FileMode.append,
+      flush: true,
+    );
   }
 
   /// Normalizes a file system [path] so it can be safely consumed by `dart:io`.
@@ -191,7 +177,7 @@ class DiscData {
     if (path == null || path.isEmpty) return null;
 
     String normalized = path;
-    if (!Platform.isWindows && !normalized.startsWith('/')) {
+    if (pathJoin == '/' && !normalized.startsWith('/')) {
       normalized = '/$normalized';
     }
 
@@ -205,35 +191,35 @@ class DiscData {
   /// Reads the file and returns its content encoded as a Base64 string.
   /// Returns `null` when the file does not exist.
   Future<String?> readFileAsBase64({String? fileName, String? path}) async {
-    final String resolved = await _resolvePath(fileName, path);
-    final File file = File(resolved);
-    if (!file.existsSync()) return null;
-    return base64Encode(file.readAsBytesSync());
+    final Uint8List? bytes = await readFileAsBytes(
+      fileName: fileName,
+      path: path,
+    );
+    return bytes == null ? null : base64Encode(bytes);
   }
 
   /// Reads the file and returns its raw bytes.
   /// Returns `null` when the file does not exist.
   Future<Uint8List?> readFileAsBytes({String? fileName, String? path}) async {
-    final String resolved = await _resolvePath(fileName, path);
-    final File file = File(resolved);
-    if (!file.existsSync()) return null;
-    return file.readAsBytesSync();
+    final File file = await _existing(fileName, path);
+    if (!await file.exists()) return null;
+    return file.readAsBytes();
   }
 
   /// Reads the file and returns its UTF-8 content.
   /// Returns `null` when the file does not exist.
   Future<String?> readFileAsString({String? fileName, String? path}) async {
-    final String resolved = await _resolvePath(fileName, path);
-    final File file = File(resolved);
-    if (!file.existsSync()) return null;
-    return file.readAsStringSync();
+    final Uint8List? bytes = await readFileAsBytes(
+      fileName: fileName,
+      path: path,
+    );
+    return bytes == null ? null : utf8.decode(bytes);
   }
 
   /// Returns the file handle, or `null` when the file does not exist.
   Future<File?> getFile({String? fileName, String? path}) async {
-    final String resolved = await _resolvePath(fileName, path);
-    final File file = File(resolved);
-    return file.existsSync() ? file : null;
+    final File file = await _existing(fileName, path);
+    return await file.exists() ? file : null;
   }
 
   /// Deletes a file on disk.
@@ -241,12 +227,11 @@ class DiscData {
   /// Returns `true` if the file did not exist or was successfully deleted,
   /// and `false` if the deletion failed.
   Future<bool> deleteFile({String? fileName, String? path}) async {
-    final String resolved = await _resolvePath(fileName, path);
-    final File file = File(resolved);
-    if (!file.existsSync()) return true;
+    final File file = await _existing(fileName, path);
+    if (!await file.exists()) return true;
     try {
-      file.deleteSync();
-      return !file.existsSync();
+      await file.delete();
+      return !await file.exists();
     } on FileSystemException catch (e, s) {
       debugPrint('deleteFile failed: $e\n$s');
       return false;
@@ -277,7 +262,8 @@ class DiscData {
   /// Loads a file whose name is stored in a column of an SQLite table.
   ///
   /// * [urlColumnName]: name of the column that holds the file name.
-  /// * [key] / [value]: condition used to locate the row (`WHERE key = value`).
+  /// * [key] / [value]: condition used to locate the row (`WHERE key = value`,
+  ///   the value being bound, never pasted into the SQL).
   /// * [path]: optional directory where the file lives. Defaults to
   ///   [filesPath] when omitted.
   ///
@@ -319,12 +305,39 @@ class DiscData {
     return null;
   }
 
-  /// Builds an absolute path from either an explicit [path] or a file name
-  /// relative to [filesPath].
-  Future<String> _resolvePath(String? fileName, String? path) async {
+  List<int> _bytesOf(Object data, DataType dataType) {
+    switch (dataType) {
+      case DataType.text:
+        return utf8.encode(data as String);
+      case DataType.base64:
+        return base64Decode(data as String);
+      case DataType.bytes:
+        return data as List<int>;
+    }
+  }
+
+  /// [name] inside [folder]; a name that would leave it throws.
+  String _inFolder(String folder, String name) {
+    if (name.isEmpty) return folder;
+    final String target = p.normalize(p.join(folder, name));
+    if (!p.isWithin(folder, target)) {
+      throw ArgumentError.value(name, 'fileName', 'must stay inside $folder');
+    }
+    return target;
+  }
+
+  /// The file designated by an explicit [path], or by [fileName] in
+  /// [filesPath] — or, when it is not there, in the 2.0.3 folder.
+  Future<File> _existing(String? fileName, String? path) async {
     final String? validated = validatePath(path);
-    if (validated != null) return validated;
-    return '${await filesPath}$pathJoin${fileName ?? ''}';
+    if (validated != null) return File(validated);
+    final String name = fileName ?? '';
+    final File primary = File(_inFolder(await filesPath, name));
+    if (name.isEmpty || await primary.exists()) return primary;
+    final String? fallback = await Locations.instance.fallbackFilesDir;
+    if (fallback == null) return primary;
+    final File old = File(_inFolder(fallback, name));
+    return await old.exists() ? old : primary;
   }
 }
 

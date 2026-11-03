@@ -15,6 +15,13 @@ class WebBackend implements Backend {
   @override
   Future<void> delete(String path) =>
       throw UnsupportedError('b012_data does not run in a browser yet.');
+
+  @override
+  Future<String?> readPointer() async => null;
+
+  @override
+  Future<void> writePointer(String name) =>
+      throw UnsupportedError('b012_data does not run in a browser yet.');
 }
 
 /// The backend of this platform.

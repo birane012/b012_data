@@ -4,8 +4,6 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
-import 'package:b012_data/b012_disc_data.dart';
-
 import 'src/backend.dart';
 import 'src/column_type.dart';
 import 'src/executor.dart';
@@ -97,12 +95,8 @@ class DataAccess {
     return opened;
   }
 
-  Future<String> _currentDatabaseName() async {
-    final String directory = await DiscData.instance.databasesPath;
-    final String dbFilePath = '$directory${DiscData.instance.pathJoin}dbName';
-    return await DiscData.instance.readFileAsString(path: dbFilePath) ??
-        'sqlf_easy.db';
-  }
+  Future<String> _currentDatabaseName() async =>
+      await _backend.readPointer() ?? 'sqlf_easy.db';
 
   Future<SqlExecutor> _executor() async => (await _open()).executor;
 
@@ -114,6 +108,10 @@ class DataAccess {
   /// `<databasesPath>/dbName`. If the file does not exist, the default
   /// name `sqlf_easy.db` is used. The file is created/updated by [changeDB].
   /// Concurrent first calls share one opening.
+  ///
+  /// On Windows and Linux the base lives in the application support folder;
+  /// a base left by 2.0.3 under the current directory is found and kept
+  /// where it is.
   Future<Database> get db async {
     final Database? database = (await _open()).database;
     if (database == null) {
@@ -150,15 +148,7 @@ class DataAccess {
         ? newDBName
         : '$newDBName.db';
 
-    final String directory = await DiscData.instance.databasesPath;
-    final String dbFilePath = '$directory${DiscData.instance.pathJoin}dbName';
-
-    final String? saved = await DiscData.instance.saveDataToDisc(
-      correctedName,
-      DataType.text,
-      path: dbFilePath,
-    );
-    if (saved == null) return;
+    await _backend.writePointer(correctedName);
 
     await closeDB();
     final Future<OpenedDatabase> opening = _openApplicationDatabase(

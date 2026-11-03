@@ -63,8 +63,9 @@ class Sandbox {
 /// Closes the application database and deletes its file, so that each test
 /// starts from an empty database.
 Future<void> resetDatabase() async {
+  final String path = (await DataAccess.instance.db).path;
   await DataAccess.instance.closeDB();
-  await DataAccess.instance.dropDB('sqlf_easy.db');
+  await DataAccess.instance.dropDB(path);
 }
 
 /// Runs [body] in a fresh sandbox shared by the tests of a file.

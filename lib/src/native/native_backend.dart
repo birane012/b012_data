@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart' show databaseFactorySqflitePlugin;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../executor.dart';
+import 'locations.dart';
 
 /// sqflite on Android, iOS and macOS (the plugin), `sqflite_common_ffi` on
 /// Windows and Linux.
@@ -19,7 +20,8 @@ class NativeBackend implements Backend {
 
   @override
   Future<OpenedDatabase> open(String nameOrPath) async {
-    final Database db = await factory.openDatabase(nameOrPath);
+    final String path = await Locations.instance.resolveDatabase(nameOrPath);
+    final Database db = await factory.openDatabase(path);
     return OpenedDatabase(
       executor: NativeExecutor(db),
       database: db,
@@ -33,6 +35,13 @@ class NativeBackend implements Backend {
 
   @override
   Future<void> delete(String path) => factory.deleteDatabase(path);
+
+  @override
+  Future<String?> readPointer() => Locations.instance.readPointer();
+
+  @override
+  Future<void> writePointer(String name) =>
+      Locations.instance.writePointer(name);
 }
 
 /// [SqlExecutor] over a sqflite [Database] or [Transaction].

@@ -156,6 +156,10 @@ Future<Map<String, Object?>> all() async {
       await disc.deleteFile(fileName: 'a.txt') &&
       !await disc.checkFileExists(fileName: 'a.txt');
   r['internet probe'] = await isInternetAvailable;
+  r['close then reopen at once'] = await attempt(() async {
+    await da.closeDB();
+    return await da.countElementsOf<Visit>() == 2;
+  });
   return r;
 }
 
@@ -166,7 +170,17 @@ Future<Map<String, Object?>> run(Map<String, String> q) async {
   };
   final String? wasm = q['wasm'];
   if (wasm != null) da.webSqliteWasmUri = Uri.parse(wasm);
+  final String? key = q['key'];
+  if (key != null) await da.useEncryptionKey(key);
   await da.changeDB(q['db'] ?? 'web_check');
+  if (q['step'] == 'encrypt') {
+    await da.encryptDatabase(q['newkey']!);
+    return <String, Object?>{
+      'encrypted': da.encryptionEnabled,
+      'rows': await da.countElementsOf<Visit>(),
+      'file': await disc.readFileAsString(fileName: 'f.txt'),
+    };
+  }
   await da.createTableIfNotExists(Visit());
   switch (q['step'] ?? 'all') {
     case 'write':
@@ -181,6 +195,22 @@ Future<Map<String, Object?>> run(Map<String, String> q) async {
       return <String, Object?>{'written': n};
     case 'count':
       return <String, Object?>{'rows': await da.countElementsOf<Visit>()};
+    case 'seed':
+      await da.insertObjet(Visit('s1', 'Kaolack', true, DateTime(2026)));
+      await disc.saveDataToDisc(
+        'note confidentielle',
+        DataType.text,
+        takeThisName: 'f.txt',
+      );
+      return <String, Object?>{
+        'rows': await da.countElementsOf<Visit>(),
+        'encrypted': da.encryptionEnabled,
+      };
+    case 'read':
+      return <String, Object?>{
+        'rows': await da.countElementsOf<Visit>(),
+        'file': await disc.readFileAsString(fileName: 'f.txt'),
+      };
     case 'probe':
       return <String, Object?>{
         'probe': await attempt(() => da.countElementsOf<Visit>()),

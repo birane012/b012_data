@@ -73,11 +73,11 @@ class WebBackend implements Backend {
         path: path,
         close: () async {
           await executor.close();
-          lock.release();
+          await lock.release();
         },
       );
     } catch (_) {
-      lock.release();
+      await lock.release();
       rethrow;
     }
   }
@@ -136,7 +136,7 @@ class WebBackend implements Backend {
       }
       await engine.fs.flush();
     } finally {
-      lock.release();
+      await lock.release();
     }
     if (_isPlain(engine.fs, path)) {
       throw StateError('The database $path could not be encrypted.');
@@ -318,34 +318,40 @@ class _WebTransaction implements SqlExecutor {
 
 /// An exclusive Web Lock held while a database is open.
 class _WebLock {
-  _WebLock._(this._release);
+  _WebLock._(this._release, this._released);
 
   final Completer<void>? _release;
 
+  /// Completes once the browser has actually released the lock.
+  final Future<void> _released;
+
   static Future<_WebLock> acquire(String name) async {
     final web.LockManager? locks = _locks();
-    if (locks == null) return _WebLock._(null);
+    if (locks == null) return _WebLock._(null, Future<void>.value());
     final Completer<bool> granted = Completer<bool>();
     final Completer<void> release = Completer<void>();
-    locks.request(
-      name,
-      web.LockOptions(ifAvailable: true),
-      ((web.Lock? lock) {
-        if (lock == null) {
-          granted.complete(false);
-          return null;
-        }
-        granted.complete(true);
-        return release.future.toJS;
-      }).toJS,
-    );
+    final Future<void> released = locks
+        .request(
+          name,
+          web.LockOptions(ifAvailable: true),
+          ((web.Lock? lock) {
+            if (lock == null) {
+              granted.complete(false);
+              return null;
+            }
+            granted.complete(true);
+            return release.future.toJS;
+          }).toJS,
+        )
+        .toDart
+        .then((_) {}, onError: (Object _) {});
     if (!await granted.future) {
       throw StateError(
         'The database is already open in another tab of this browser. '
         'Close the other tab, then try again.',
       );
     }
-    return _WebLock._(release);
+    return _WebLock._(release, released);
   }
 
   static web.LockManager? _locks() {
@@ -356,9 +362,12 @@ class _WebLock {
     }
   }
 
-  void release() {
+  /// Releases the lock and waits until the browser has released it, so that
+  /// the same tab can open the database again at once.
+  Future<void> release() {
     final Completer<void>? r = _release;
     if (r != null && !r.isCompleted) r.complete();
+    return _released;
   }
 }
 

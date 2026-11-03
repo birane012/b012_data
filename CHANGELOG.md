@@ -30,7 +30,7 @@ Everything of 2.0.3 keeps working unchanged; everything new is opt-in. See
   for the files; an encrypted database is never opened without its key.
 * Requires Dart 3.12 / Flutter 3.44 (current `sqflite`); older Flutter
   versions keep resolving 2.0.3.
-* Tests: the package now has 79 of them, plus a browser check
+* Tests: the package now has 98 of them, plus a browser check
   (`tool/web_check`).
 
 ## 2.0.3

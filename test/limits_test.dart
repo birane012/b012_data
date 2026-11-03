@@ -42,6 +42,17 @@ void main() {
     });
   });
 
+  group('registerEntity and an existing table', () {
+    test('a registered name differing only in case finds the table', () async {
+      expect(await da.insertObjet(_p('p1', 'A')), isTrue);
+      await da.closeDB();
+      da.registerEntity<Person>('person');
+      expect(await da.checkIfTableExists('person'), isTrue);
+      expect(await da.insertObjet(_p('p2', 'B')), isTrue);
+      expect(await da.countElementsOf<Person>(), 2);
+    });
+  });
+
   group('transaction', () {
     test('everything or nothing', () async {
       await expectLater(

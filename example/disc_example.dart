@@ -32,19 +32,22 @@ class Images {
 
   // 2. Optional: non-nullable columns, unique columns, check constraints,
   //    default values and foreign keys.
-  List<String> get notNulls =>
-      const <String>['imageName', 'dateSave', 'dateLastUpdate'];
+  List<String> get notNulls => const <String>[
+    'imageName',
+    'dateSave',
+    'dateLastUpdate',
+  ];
 
   // 3. Required: unnamed constructor.
   Images([this.imageID, this.imageName, this.dateSave, this.dateLastUpdate]);
 
   // 4. Required: serialization to a Map.
   Map<String, dynamic> toMap() => <String, dynamic>{
-        'imageID': imageID ?? ColumnType.String,
-        'imageName': imageName ?? ColumnType.String,
-        'dateSave': dateSave ?? ColumnType.DateTime,
-        'dateLastUpdate': dateLastUpdate ?? ColumnType.DateTime,
-      };
+    'imageID': imageID ?? ColumnType.String,
+    'imageName': imageName ?? ColumnType.String,
+    'dateSave': dateSave ?? ColumnType.DateTime,
+    'dateLastUpdate': dateLastUpdate ?? ColumnType.DateTime,
+  };
 
   // 5. Required: deserialization from a row.
   Images.fromMap(Map<String, Object?> json, {bool isInt = true}) {
@@ -92,7 +95,8 @@ Future<void> runDiscDemo() async {
     Images('img0001', 'testImage.png', DateTime.now(), DateTime.now()),
   );
   debugPrint(
-      'Image record saved in Images table on sqlf_easy.db database ? $imageRecordCreated\n');
+    'Image record saved in Images table on sqlf_easy.db database ? $imageRecordCreated\n',
+  );
 
   //1. Save an Image in base64 format to the default `files` directory.
   final String? testImage = await DiscData.instance.saveDataToDisc(
@@ -143,7 +147,10 @@ Future<void> runDiscDemo() async {
   // single call.
   final Uint8List? entityBytes = await DiscData.instance
       .getEntityFileOnDisc<Uint8List, Images>(
-          'imageName', 'imageimageID', 'img0001');
+        'imageName',
+        'imageimageID',
+        'img0001',
+      );
   debugPrint('Image img0001 Entity file bytes: ${entityBytes?.length ?? 0}');
 }
 

@@ -778,7 +778,7 @@ class DataAccess {
   /// Returns `true` if a table named [table] exists.
   Future<bool> checkIfTableExists(String table) async {
     final List<Map<String, Object?>> rows = await (await _executor()).select(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name = ? COLLATE NOCASE",
       <Object?>[table],
     );
     return rows.isNotEmpty;

@@ -16,6 +16,7 @@
 import 'package:flutter/material.dart';
 import 'disc_example.dart' as disc;
 import 'sqlite_example.dart' as sqlite;
+import 'whats_new_example.dart' as whats_new;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,9 @@ Future<void> main() async {
 
   // 2. File system / binary file walk-through (Images entity).
   await disc.runDiscDemo();
+
+  // 3. What is new in 2.1: registration, bound values, transactions, queries.
+  await whats_new.runWhatsNewDemo();
 
   runApp(
     const MaterialApp(

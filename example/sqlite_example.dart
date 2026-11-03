@@ -30,8 +30,12 @@ class Person {
 
   // 2. Optional: non-nullable columns, unique columns, check constraints,
   //    default values and foreign keys.
-  List<String> get notNulls =>
-      const <String>['firstName', 'lastName', 'sex', 'dateOfBirth'];
+  List<String> get notNulls => const <String>[
+    'firstName',
+    'lastName',
+    'sex',
+    'dateOfBirth',
+  ];
   // List<String> get uniques => const <String>['email'];
   // Map<String, String> get checks => const {'email': 'length(email) > 4'};
   // Map<String, String> get defaults => const {'profession': 'NULL'};
@@ -52,12 +56,12 @@ class Person {
   //    For non-nullable fields the `ColumnType` fallback can be omitted —
   //    the value will never be null at insertion time.
   Map<String, dynamic> toMap() => <String, dynamic>{
-        'idPers': idPers ?? ColumnType.String,
-        'firstName': firstName ?? ColumnType.String,
-        'lastName': lastName ?? ColumnType.String,
-        'sex': sex ?? ColumnType.bool,
-        'dateOfBirth': dateOfBirth ?? ColumnType.DateTime,
-      };
+    'idPers': idPers ?? ColumnType.String,
+    'firstName': firstName ?? ColumnType.String,
+    'lastName': lastName ?? ColumnType.String,
+    'sex': sex ?? ColumnType.bool,
+    'dateOfBirth': dateOfBirth ?? ColumnType.DateTime,
+  };
 
   // 5. Required: deserialization from a row.
   Person.fromMap(Map<String, Object?> json, {bool isInt = true}) {
@@ -80,8 +84,8 @@ Future<void> runSqliteDemo() async {
   debugPrint('${DataAccess.instance.showCreateTable(Person())}\n\n');
 
   // Does the Person table already exist in the database?
-  final bool personTableExists =
-      await DataAccess.instance.checkIfEntityTableExists<Person>();
+  final bool personTableExists = await DataAccess.instance
+      .checkIfEntityTableExists<Person>();
   debugPrint('Person table exists? $personTableExists\n');
 
   // CREATE — insert a single Person row.
@@ -91,11 +95,11 @@ Future<void> runSqliteDemo() async {
   debugPrint('Single insert ok? $inserted\n');
 
   // CREATE (bulk) — insert several Persons inside a single transaction.
-  final bool personsListInserted =
-      await DataAccess.instance.insertObjetList(<Person>[
-    Person(newKey, 'Mbaye', 'Aliou', true, DateTime(1999, 5, 1)),
-    Person(newKey, 'Cisse', 'Fatou', false, DateTime(2000, 7, 9)),
-  ]);
+  final bool personsListInserted = await DataAccess.instance
+      .insertObjetList(<Person>[
+        Person(newKey, 'Mbaye', 'Aliou', true, DateTime(1999, 5, 1)),
+        Person(newKey, 'Cisse', 'Fatou', false, DateTime(2000, 7, 9)),
+      ]);
   debugPrint('Bulk insert ok? $personsListInserted\n');
 
   // READ — fetch a single row matching an SQL predicate.
@@ -120,8 +124,8 @@ Future<void> runSqliteDemo() async {
   debugPrint('Men: ${men?.length ?? 0}\n');
 
   // READ (projection) — pull a single column across the whole table.
-  final List<String> firstNames =
-      await DataAccess.instance.getAColumnFrom<String, Person>('firstName');
+  final List<String> firstNames = await DataAccess.instance
+      .getAColumnFrom<String, Person>('firstName');
   debugPrint('First names: $firstNames\n');
 
   final List<String> womenFirstNames = await DataAccess.instance
@@ -133,11 +137,8 @@ Future<void> runSqliteDemo() async {
       .getSomeColumnsFrom<Person>('firstName, lastName');
   debugPrint('First + last names: $nameRows\n');
 
-  final List<Map<String, Object?>> womenNameRows =
-      await DataAccess.instance.getSomeColumnsFrom<Person>(
-    'firstName, lastName',
-    afterWhere: 'sex = 0',
-  );
+  final List<Map<String, Object?>> womenNameRows = await DataAccess.instance
+      .getSomeColumnsFrom<Person>('firstName, lastName', afterWhere: 'sex = 0');
   debugPrint('Women first + last names: $womenNameRows\n');
 
   // UPDATE — values follow the order `columnsToUpadate` + `whereColumns`.
@@ -189,8 +190,9 @@ Future<void> main() async {
 
   runApp(
     const MaterialApp(
-      home:
-          Scaffold(body: Center(child: Text('runSqliteDemo tests completed'))),
+      home: Scaffold(
+        body: Center(child: Text('runSqliteDemo tests completed')),
+      ),
     ),
   );
 }

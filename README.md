@@ -9,12 +9,15 @@ repository.
 * Object persistence on a local **SQLite** database, via `DataAccess.instance`.
 * File system helpers (read, write, append, check, delete, load binary files as images, audios, videos and so on), via `DiscData.instance`.
 
-Supported platforms: **Android, iOS, macOS, Linux, Windows**.
+Supported platforms: **Android, iOS, macOS, Linux, Windows and web**.
+Optional encryption of the database and of the files (2.1).
 
 > On mobile platforms (Android, iOS, macOS) the package uses the native
 > [`sqflite`](https://pub.dev/packages/sqflite) implementation.
 > On desktop platforms (Linux, Windows) it transparently falls back to
 > [`sqflite_common_ffi`](https://pub.dev/packages/sqflite_common_ffi).
+> In a browser it runs SQLite as WebAssembly with
+> [`sqlite3`](https://pub.dev/packages/sqlite3) (see [Web](#web)).
 
 More details and a longer walk-through can be found at
 <https://birane012.github.io>.
@@ -27,7 +30,7 @@ Add the package to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  b012_data: ^2.0.3
+  b012_data: ^2.1.0
 ```
 
 Then run:
@@ -36,7 +39,10 @@ Then run:
 flutter pub get
 ```
 
-**Important note:** As soon as `b012_data` is imported in your code, a default database named `sqlf_easy.db` is automatically created in the application's documents directory specially in the databases folder. You can use the changeDB method if you don't want to use this one.
+2.1 requires Dart 3.12 and Flutter 3.44 or later (the current `sqflite`
+packages do); an application on an older Flutter keeps resolving 2.0.3.
+
+**Important note:** The first access creates a default database named `sqlf_easy.db` in the application's databases folder (see [Where your data lives](#where-your-data-lives)). You can use the changeDB method if you don't want to use this one.
 
 Before calling any method that needs the application documents directory
 (`databasesPath`, `filesPath`, etc.), make sure the Flutter bindings are
@@ -239,8 +245,10 @@ Future<void> runSqliteDemo() async {
    when the underlying table does not exist. The exceptions are
    `updateWholeObject`, `updateSomeColumnsOf`, `getAColumnFromWithTableName`
    and `getAColumnFrom`, which catch the error and only log it via
-   `debugPrint`. Wrap the other methods in `try` / `catch` if you are not
-   sure the table already exists.
+   `debugPrint` (and `onError`) — unless `strict` is set. Wrap the other
+   methods in `try` / `catch` if you are not sure the table already exists.
+3. `afterWhere` texts are inserted as is: never build them from user input,
+   use `?` and `whereArgs` (see [Security](#security-bound-values)).
 2. `insertObjet` and `insertObjetList` internally convert your entity map
    using `mapToUse(entity.toMap())`. Call `mapToUse(entity.toMap(), forDB: false)`
    yourself when you want a plain Dart map (e.g. for JSON serialization or
@@ -406,6 +414,225 @@ Future<void> runDiscDemo() async {
 
 ---
 
+## What's new in 2.1
+
+2.1 hardens the package without changing how you use it: every method of
+2.0.3 keeps its name, its parameters and its default behaviour (including
+returning `false`, `null` or `[]` on failure). Everything new is opt-in.
+
+### Security: bound values
+
+`afterWhere` is inserted as is after `WHERE` (that is what lets you write
+`ORDER BY` and `LIMIT` in it): **never build it from user input**. Put `?`
+placeholders in it and pass the values in `whereArgs` instead — booleans and
+dates are bound exactly as b012_data stores them:
+
+```dart
+final Person? p = await DataAccess.instance.get<Person>(
+  Person(),
+  'lastName = ? AND sex = ?',
+  [userInput, true],
+);
+final int n = await DataAccess.instance.countElementsOf<Person>(
+  afterWhere: 'dateOfBirth >= ?',
+  whereArgs: [DateTime(2000)],
+);
+```
+
+Every `afterWhere` method accepts `whereArgs` (positional after
+`afterWhere` for `get`, `getAllSorted` and `deleteObjet`, named otherwise).
+The queries the package builds itself (`getLogin`, `checkIfTableExists`,
+`getEntityFileOnDisc`, ...) always bind their values. Table and column names
+that are SQL keywords (`order`, `group`, ...) are quoted for you; in your own
+`afterWhere` text, quote them yourself (`'"group" = ?'`). `whereMcop` accepts
+only `AND` and `OR`.
+
+### Errors: strict mode
+
+```dart
+DataAccess.instance.strict = true;          // throw the real error
+DataAccess.instance.onError = (e, s) => log(e); // or just be told
+```
+
+With `strict`, a failing insert or update throws the real `DatabaseException`
+instead of returning `false`; "nothing found" is still `null` or `[]`.
+Without it, every error turned into `false` or `[]` is still printed with
+`debugPrint` and also passed to `onError`.
+
+### Transactions
+
+```dart
+await DataAccess.instance.transaction(() async {
+  await DataAccess.instance.insertObjet(order);
+  await DataAccess.instance.updateSomeColumnsOf<Stock>(['qty'], ['id'], [qty - 1, id]);
+}); // everything or nothing
+```
+
+Every `DataAccess` method called inside takes part in the transaction; a
+transaction started inside a transaction joins it. `insertObjetList` keeps
+its 2.0.3 behaviour (rows before a failing one are kept) unless you call it
+inside `transaction`.
+
+### Replace, keys, indexes
+
+```dart
+await DataAccess.instance.insertObjet(person, orReplace: true); // INSERT OR REPLACE
+```
+
+New optional entity getters:
+
+```dart
+List<String> get pKeys => ['maintenanceId', 'technicianId'];   // composite key
+Map<String, List<String>> get indexes => {'assignment_trade': ['trade']};
+Map<String, List<String>> get uniqueIndexes => {'one_trade': ['maintenanceId', 'trade']};
+```
+
+Indexes are created when missing, also on an existing table.
+
+### Stable table names
+
+A table is named after its class. Obfuscated builds (and web release
+builds) change class names, so register the entities whose name must not
+move:
+
+```dart
+DataAccess.instance.registerEntity<Person>('person');
+```
+
+Every method follows the registration, including the ones that only receive
+the type (`countElementsOf<Person>()`). **In a browser, registration is
+required.**
+
+### Schema evolution and migrations
+
+```dart
+DataAccess.instance.autoAddColumns = true; // new entity columns are added
+DataAccess.instance.migrations = {
+  2: () => DataAccess.instance.rawExecute('UPDATE person SET sex = 0 WHERE sex IS NULL'),
+  3: () async { /* ... */ },
+};
+```
+
+With `autoAddColumns` (off by default), a column added to an entity is added
+to its table (`ALTER TABLE ... ADD COLUMN`); columns are never dropped or
+renamed. Migrations run once each when the database opens, in order, each in
+its own transaction that sets `PRAGMA user_version`; a failing step is rolled
+back and makes the opening fail. Set both before the first access.
+
+### Queries
+
+```dart
+final List<Person> page = await DataAccess.instance.query<Person>(
+  Person(),
+  where: 'sex = ?',
+  whereArgs: [true],
+  orderBy: 'lastName',
+  limit: 20,
+  offset: 40,
+); // [] when nothing matches
+final rows = await DataAccess.instance.rawQuery('SELECT ... WHERE x = ?', [x]);
+final people = await DataAccess.instance.rawQueryAs<Person>(Person(), 'SELECT ...');
+final changed = await DataAccess.instance.rawExecute('UPDATE ... WHERE id = ?', [id]);
+```
+
+### Foreign keys
+
+`fKeys` were declared but never enforced. Set
+`DataAccess.instance.enforceForeignKeys = true` before the first access to
+enforce them (`PRAGMA foreign_keys = ON`). It is off by default because
+enforcing them could break an application that inserts a child before its
+parent.
+
+### Where your data lives
+
+* **Android, iOS, macOS**: exactly as in 2.0.3.
+* **Windows, Linux**: 2.0.3 created the database under the *current
+  directory* (`.dart_tool/sqflite_common_ffi/databases`), so launching the
+  application from another folder opened another database, and the `dbName`
+  file and the files folder were shared by every application of the
+  computer. 2.1 keeps a new installation's databases, `dbName` and files in
+  the application support folder. A database left by 2.0.3 is found and kept
+  where it is (its absolute path is recorded), so nothing disappears; an
+  application in that case keeps its 2.0.3 files folder too, and files saved
+  by 2.0.3 stay readable by name either way.
+* `changeDB` creates the folder it needs.
+
+### Files
+
+Files are read and written asynchronously. A file is written to a temporary
+file, flushed, then renamed over the target: a reader never sees half of it.
+A file *name* can no longer point outside `filesPath` (`'../x'` throws an
+`ArgumentError`); explicit absolute paths work as before.
+
+### Web
+
+The same API runs in a browser:
+
+```sh
+dart run b012_data:setup_web   # puts sqlite3mc.wasm and sqlite3.wasm in web/
+```
+
+* SQLite runs as WebAssembly (`sqlite3mc.wasm` by default; set
+  `DataAccess.instance.webSqliteWasmUri` to use another module). Databases
+  and `DiscData` files live in IndexedDB; persistent storage is requested.
+* Every write is stored in IndexedDB before its future completes.
+* One tab at a time: a second tab opening the same database gets a clear
+  `StateError` instead of a copy that would overwrite the first.
+* Entities must be registered (`registerEntity`).
+* `DataAccess.db` and `openDB` (sqflite objects) are not available;
+  `DiscData.getFile` returns `null` (there is no file system).
+* A browser can still erase site data when the user clears it.
+
+### Encryption
+
+Against a lost or stolen device, the database and the files saved by name
+can be encrypted with [SQLite3MultipleCiphers](https://github.com/utelle/SQLite3MultipleCiphers)
+(MIT licence). Choose this engine in **your application's** `pubspec.yaml`:
+
+```yaml
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlite3mc
+```
+
+(in a browser, `setup_web` already provides `sqlite3mc.wasm`). Then:
+
+```dart
+await DataAccess.instance.useEncryptionKey(key);      // before the first access
+await DataAccess.instance.encryptDatabase(key);       // encrypt an existing plaintext database in place
+await DataAccess.instance.changeEncryptionKey(newKey);
+```
+
+* A new database is created encrypted; a wrong key throws a `StateError`.
+* The engine is checked first: if it does not encrypt, a `StateError` says
+  what to add to `pubspec.yaml`. A database is never created in plaintext by
+  mistake.
+* A key given for an existing plaintext database is refused (use
+  `encryptDatabase`); an encrypted database is never opened without its key
+  (on Android the system SQLite would take it for a corrupt file and erase
+  it).
+* Files saved by name with `DiscData` are encrypted (AES-256-GCM) with a
+  random key kept inside the encrypted database, so changing the database key
+  rewrites no file. Files written at an explicit path (exports) stay plain
+  unless `saveDataToDisc(..., encrypt: true)`. Older plaintext files remain
+  readable; `encryptDatabase` encrypts them too.
+* On Android and iOS an encrypted database goes through the engine bundled
+  by `package:sqlite3`, not the system SQLite.
+* **b012_data never stores the key**: your application provides it at each
+  start. On a device, keep a random key in the system vault (Keystore,
+  Keychain, Windows data protection) and unlock it however your application
+  authenticates its user. In a browser there is no vault: the key must come
+  from something the user types, or the encryption protects nothing.
+
+### Tested platforms
+
+2.1 was tested on Windows (unit tests, real SQLite3MultipleCiphers), in
+Chrome (a check application in `tool/web_check`) and on an Android emulator.
+iOS, macOS and Linux share the same code paths but were not run.
+
+---
+
 ## Full worked example
 
 The [`example/`](example) folder splits the two concerns into self-contained,
@@ -418,7 +645,10 @@ runnable files so each API can be explored in isolation:
   binary file demo (text, Base64, raw bytes, `Image`) built around
   `DiscData.instance` and the `Images` entity.
   Run it alone with `flutter run -t example/disc_example.dart`.
-* [`example/main.dart`](example/main.dart) — Entry point that runs both
+* [`example/whats_new_example.dart`](example/whats_new_example.dart) — the
+  2.1 additions: registration, bound values, transactions, queries, replace.
+  Run it alone with `flutter run -t example/whats_new_example.dart`.
+* [`example/main.dart`](example/main.dart) — Entry point that runs the
   demos in sequence.
 
 ---

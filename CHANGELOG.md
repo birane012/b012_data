@@ -1,3 +1,38 @@
+## 2.1.0
+
+Everything of 2.0.3 keeps working unchanged; everything new is opt-in. See
+"What's new in 2.1" in the README.
+
+* **Security.** Values the package writes itself are bound
+  (`getEntityFileOnDisc`, `checkIfTableExists`, `getLogin`, ...): a value
+  with an apostrophe works, a crafted name cannot inject SQL. Every
+  `afterWhere` method takes `whereArgs`. SQL keywords used as table or
+  column names are quoted. `whereMcop` accepts only `AND` and `OR`.
+* **Errors.** `strict` throws the real error instead of `false` / `[]`;
+  `onError` receives the errors turned into `false` / `[]`. Failing entity
+  getters are reported. A constant `checks` map no longer crashes table
+  creation when the entity has a boolean column.
+* **Robustness.** One opening shared by concurrent first accesses; table
+  creations serialized.
+* **Location (Windows, Linux).** New installations keep their databases,
+  `dbName` and files in the application support folder instead of the
+  current directory and folders shared by every application; a 2.0.3
+  database is found and kept where it is. `changeDB` creates its folder.
+* **Files.** Asynchronous, written all at once, names cannot leave
+  `filesPath`.
+* **New:** `transaction`, `insertObjet(orReplace:)`, `registerEntity`,
+  `pKeys`, `indexes`, `uniqueIndexes`, `autoAddColumns`, `migrations`,
+  `query`, `rawQuery`, `rawQueryAs`, `rawExecute`, `enforceForeignKeys`.
+* **Web.** Runs in a browser (WebAssembly SQLite, IndexedDB, every write
+  stored before it returns, one tab at a time); `dart run b012_data:setup_web`.
+* **Encryption.** `useEncryptionKey`, `encryptDatabase`,
+  `changeEncryptionKey`: SQLite3MultipleCiphers for the database, AES-256-GCM
+  for the files; an encrypted database is never opened without its key.
+* Requires Dart 3.12 / Flutter 3.44 (current `sqflite`); older Flutter
+  versions keep resolving 2.0.3.
+* Tests: the package now has 79 of them, plus a browser check
+  (`tool/web_check`).
+
 ## 2.0.3
 
 * Added the `static_and_variables.dart` file with a base64 image used for illustration in `disc_example.dart`.

@@ -49,89 +49,123 @@ String dartTypeOf(Object? value) {
   return value.runtimeType.toString();
 }
 
-/// The `CREATE TABLE` statement of [entity] for [table], built from
-/// `toMap()` and the optional getters `pKeyAuto`, `notNulls`, `uniques`,
-/// `checks`, `defaults` and `fKeys` — the text 2.0.3 wrote, with names that
-/// are SQL keywords (or not plain identifiers) quoted.
-String buildCreateTable(
-  Object entity,
-  String table,
-  GetterErrorHandler onGetterError,
-) {
-  final MapEntry<String, bool>? pKeyAuto = readGetter(
-    entity,
-    'pKeyAuto',
-    (dynamic e) => e.pKeyAuto as MapEntry<String, bool>?,
-    onGetterError,
-  );
-  final List<String>? notNulls = readGetter(
-    entity,
-    'notNulls',
-    (dynamic e) => (e.notNulls as List<Object?>?)?.cast<String>(),
-    onGetterError,
-  );
-  final List<String>? uniques = readGetter(
-    entity,
-    'uniques',
-    (dynamic e) => (e.uniques as List<Object?>?)?.cast<String>(),
-    onGetterError,
-  );
-  final Map<String, String>? checks = readGetter(
-    entity,
-    'checks',
-    (dynamic e) => (e.checks as Map<Object?, Object?>?)?.cast<String, String>(),
-    onGetterError,
-  );
-  final Map<String, String>? defaults = readGetter(
-    entity,
-    'defaults',
-    (dynamic e) =>
-        (e.defaults as Map<Object?, Object?>?)?.cast<String, String>(),
-    onGetterError,
-  );
-  final Map<String, List<String>>? fKeys = readGetter(
-    entity,
-    'fKeys',
-    (dynamic e) => (e.fKeys as Map<Object?, Object?>?)?.map(
+List<String>? _strings(Object? value) =>
+    (value as List<Object?>?)?.cast<String>();
+
+Map<String, String>? _stringMap(Object? value) =>
+    (value as Map<Object?, Object?>?)?.cast<String, String>();
+
+Map<String, List<String>>? _listMap(Object? value) =>
+    (value as Map<Object?, Object?>?)?.map(
       (Object? k, Object? v) =>
           MapEntry(k! as String, (v! as List<Object?>).cast<String>()),
-    ),
-    onGetterError,
-  );
+    );
 
-  // A copy: the entity may return a constant map.
-  final Map<String, String> allChecks = <String, String>{...?checks};
-  final Map<String, dynamic> objectMap =
-      (entity as dynamic).toMap() as Map<String, dynamic>;
-  final String lastFieldName = objectMap.keys.last;
+/// What an entity declares about its table, read once.
+class EntitySchema {
+  EntitySchema(Object entity, GetterErrorHandler onError)
+    : pKeyAuto = readGetter(
+        entity,
+        'pKeyAuto',
+        (dynamic e) => e.pKeyAuto as MapEntry<String, bool>?,
+        onError,
+      ),
+      pKeys = readGetter(
+        entity,
+        'pKeys',
+        (dynamic e) => _strings(e.pKeys),
+        onError,
+      ),
+      notNulls = readGetter(
+        entity,
+        'notNulls',
+        (dynamic e) => _strings(e.notNulls),
+        onError,
+      ),
+      uniques = readGetter(
+        entity,
+        'uniques',
+        (dynamic e) => _strings(e.uniques),
+        onError,
+      ),
+      checks = readGetter(
+        entity,
+        'checks',
+        (dynamic e) => _stringMap(e.checks),
+        onError,
+      ),
+      defaults = readGetter(
+        entity,
+        'defaults',
+        (dynamic e) => _stringMap(e.defaults),
+        onError,
+      ),
+      fKeys = readGetter(
+        entity,
+        'fKeys',
+        (dynamic e) => _listMap(e.fKeys),
+        onError,
+      ),
+      indexes = readGetter(
+        entity,
+        'indexes',
+        (dynamic e) => _listMap(e.indexes),
+        onError,
+      ),
+      uniqueIndexes = readGetter(
+        entity,
+        'uniqueIndexes',
+        (dynamic e) => _listMap(e.uniqueIndexes),
+        onError,
+      ),
+      columns = ((entity as dynamic).toMap() as Map<String, dynamic>).map(
+        (String k, dynamic v) => MapEntry(k, dartTypeOf(v as Object?)),
+      );
+
+  final MapEntry<String, bool>? pKeyAuto;
+  final List<String>? pKeys;
+  final List<String>? notNulls;
+  final List<String>? uniques;
+  final Map<String, String>? checks;
+  final Map<String, String>? defaults;
+  final Map<String, List<String>>? fKeys;
+  final Map<String, List<String>>? indexes;
+  final Map<String, List<String>>? uniqueIndexes;
+
+  /// Column name → Dart type name, in `toMap()` order.
+  final Map<String, String> columns;
+
+  /// The CHECK of [column]: the boolean check for a `bool` column (which
+  /// replaces a declared one, as in 2.0.3), else the declared one.
+  String? checkOf(String column) => columns[column] == 'bool'
+      ? '${quoteIdentifier(column)} IN (0, 1)'
+      : checks?[column];
+
+  bool get hasCompositeKey =>
+      pKeyAuto == null && pKeys != null && pKeys!.isNotEmpty;
+}
+
+/// The `CREATE TABLE` statement for [table] — the text 2.0.3 wrote, with
+/// names that are SQL keywords (or not plain identifiers) quoted, and a
+/// composite primary key when the entity declares `pKeys`.
+String buildCreateTable(EntitySchema s, String table) {
+  final String lastFieldName = s.columns.keys.last;
+  final Map<String, List<String>>? fKeys = s.fKeys;
   final bool hasForeignKey = fKeys != null && fKeys.isNotEmpty;
+  final bool hasConstraints = hasForeignKey || s.hasCompositeKey;
 
   final StringBuffer buffer = StringBuffer()
     ..write('CREATE TABLE ${quoteIdentifier(table)} (\n');
-  objectMap.forEach((String columnName, dynamic columnValue) {
-    final String dartType = dartTypeOf(columnValue as Object?);
-    final String column = quoteIdentifier(columnName);
-    if (dartType == 'bool') allChecks[columnName] = '$column IN (0, 1)';
-    buffer.write('$column ${sqlTypeFor(dartType)}');
-    if (pKeyAuto != null && pKeyAuto.key == columnName) {
-      buffer.write(' PRIMARY KEY');
-      if (pKeyAuto.value) buffer.write(' AUTOINCREMENT');
-    }
-    if (notNulls != null && notNulls.contains(columnName)) {
-      buffer.write(' NOT NULL');
-    }
-    if (uniques != null && uniques.contains(columnName)) {
-      buffer.write(' UNIQUE');
-    }
-    if (defaults != null && defaults.containsKey(columnName)) {
-      buffer.write(' DEFAULT ${defaults[columnName]}');
-    }
-    if (allChecks.containsKey(columnName)) {
-      buffer.write(' CHECK(${allChecks[columnName]})');
-    }
-    buffer.write(columnName != lastFieldName || hasForeignKey ? ',\n' : '\n)');
-  });
-
+  for (final String columnName in s.columns.keys) {
+    buffer.write(columnDefinition(s, columnName, forAlter: false));
+    buffer.write(columnName != lastFieldName || hasConstraints ? ',\n' : '\n)');
+  }
+  if (s.hasCompositeKey) {
+    buffer.write(
+      'PRIMARY KEY (${s.pKeys!.map(quoteIdentifier).join(', ')})'
+      '${hasForeignKey ? ',\n' : '\n)'}',
+    );
+  }
   if (hasForeignKey) {
     final String lastFKeyField = fKeys.keys.last;
     fKeys.forEach((String field, List<String> target) {
@@ -144,3 +178,42 @@ String buildCreateTable(
   }
   return buffer.toString();
 }
+
+/// One column of [s]. For `ALTER TABLE ... ADD COLUMN` ([forAlter]), SQLite
+/// refuses PRIMARY KEY and UNIQUE, and NOT NULL without a default.
+String columnDefinition(
+  EntitySchema s,
+  String columnName, {
+  required bool forAlter,
+}) {
+  final StringBuffer line = StringBuffer(
+    '${quoteIdentifier(columnName)} ${sqlTypeFor(s.columns[columnName]!)}',
+  );
+  final MapEntry<String, bool>? pKeyAuto = s.pKeyAuto;
+  if (!forAlter && pKeyAuto != null && pKeyAuto.key == columnName) {
+    line.write(' PRIMARY KEY');
+    if (pKeyAuto.value) line.write(' AUTOINCREMENT');
+  }
+  final String? defaultValue = s.defaults?[columnName];
+  final bool notNull = s.notNulls?.contains(columnName) ?? false;
+  if (notNull && (!forAlter || defaultValue != null)) line.write(' NOT NULL');
+  if (!forAlter && (s.uniques?.contains(columnName) ?? false)) {
+    line.write(' UNIQUE');
+  }
+  if (defaultValue != null) line.write(' DEFAULT $defaultValue');
+  final String? check = s.checkOf(columnName);
+  if (check != null) line.write(' CHECK($check)');
+  return line.toString();
+}
+
+/// `CREATE [UNIQUE] INDEX IF NOT EXISTS` statements of [s] for [table].
+List<String> buildIndexes(EntitySchema s, String table) => <String>[
+  for (final MapEntry<String, List<String>> e
+      in (s.indexes ?? const <String, List<String>>{}).entries)
+    'CREATE INDEX IF NOT EXISTS ${quoteIdentifier(e.key)} '
+        'ON ${quoteIdentifier(table)} (${e.value.map(quoteIdentifier).join(', ')})',
+  for (final MapEntry<String, List<String>> e
+      in (s.uniqueIndexes ?? const <String, List<String>>{}).entries)
+    'CREATE UNIQUE INDEX IF NOT EXISTS ${quoteIdentifier(e.key)} '
+        'ON ${quoteIdentifier(table)} (${e.value.map(quoteIdentifier).join(', ')})',
+];

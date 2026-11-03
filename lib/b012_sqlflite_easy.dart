@@ -55,6 +55,41 @@ class DataAccess {
   final Set<String> _knownTables = <String>{};
   Future<void> _tableLock = Future<void>.value();
   int _openCount = 0;
+  final Map<Type, String> _registry = <Type, String>{};
+  static final Object _txKey = Object();
+
+  /// When `true`, a column added to an entity is added to its table the first
+  /// time the table is used (`ALTER TABLE ... ADD COLUMN`: type, `DEFAULT`,
+  /// boolean `CHECK`; `NOT NULL` only together with a `DEFAULT`). Columns are
+  /// never dropped or renamed. Defaults to `false`.
+  bool autoAddColumns = false;
+
+  /// When `true`, `PRAGMA foreign_keys = ON` is set when the database opens,
+  /// so the `fKeys` of the entities are enforced. Set it before the first
+  /// access (or call [closeDB] to apply it). Defaults to `false`, because
+  /// enforcing them could break an application that inserts a child before
+  /// its parent.
+  bool enforceForeignKeys = false;
+
+  /// Versioned migrations, run when the database opens: each step `n` above
+  /// the database version (`PRAGMA user_version`) runs once, in increasing
+  /// order, in its own transaction, which then sets the version to `n`. The
+  /// [DataAccess] methods called inside a step take part in its transaction.
+  /// A failing step is rolled back and makes the opening fail. Set them
+  /// before the first access.
+  Map<int, Future<void> Function()> migrations =
+      <int, Future<void> Function()>{};
+
+  /// The table of the entity class [T] is [tableName] instead of the class
+  /// name. Every method follows it, whether it receives an instance or only
+  /// the type [T]. Register before using the entity; recommended when the
+  /// application is obfuscated, since class names then change from one build
+  /// to the next.
+  void registerEntity<T>(String tableName) => _registry[T] = tableName;
+
+  /// Forgets every registration (tests only).
+  @visibleForTesting
+  void debugClearRegistry() => _registry.clear();
 
   /// Number of times the application database was opened (for tests).
   @visibleForTesting
@@ -91,16 +126,69 @@ class DataAccess {
   Future<OpenedDatabase> _openApplicationDatabase({String? name}) async {
     final String dbName = name ?? await _currentDatabaseName();
     final OpenedDatabase opened = await _backend.open(dbName);
+    try {
+      if (enforceForeignKeys) {
+        await opened.executor.execute('PRAGMA foreign_keys = ON');
+      }
+      await _runMigrations(opened.executor);
+    } catch (_) {
+      await opened.close();
+      rethrow;
+    }
     _openCount++;
     return opened;
+  }
+
+  Future<void> _runMigrations(SqlExecutor executor) async {
+    if (migrations.isEmpty) return;
+    final Object? version = (await executor.select(
+      'PRAGMA user_version',
+    )).first['user_version'];
+    final int current = version is int ? version : 0;
+    final List<int> steps =
+        migrations.keys.where((int step) => step > current).toList()..sort();
+    for (final int step in steps) {
+      await executor.transaction((SqlExecutor tx) async {
+        await runZoned(
+          () => migrations[step]!(),
+          zoneValues: <Object, Object>{_txKey: _TxScope(tx)},
+        );
+        await tx.execute('PRAGMA user_version = $step');
+      });
+    }
   }
 
   Future<String> _currentDatabaseName() async =>
       await _backend.readPointer() ?? 'sqlf_easy.db';
 
-  Future<SqlExecutor> _executor() async => (await _open()).executor;
+  _TxScope? get _scope => Zone.current[_txKey] as _TxScope?;
 
-  String _tableOf(Object entity) => entity.runtimeType.toString();
+  Future<SqlExecutor> _executor() async =>
+      _scope?.executor ?? (await _open()).executor;
+
+  String _tableOf(Object entity) =>
+      _registry[entity.runtimeType] ?? entity.runtimeType.toString();
+
+  String _tableFor<T>() => _registry[T] ?? T.toString();
+
+  /// Runs [action] in a transaction: everything or nothing. The [DataAccess]
+  /// methods called inside [action] take part in it; a transaction started
+  /// inside a transaction joins it. If [action] throws, every change is
+  /// rolled back and the error is rethrown.
+  Future<R> transaction<R>(Future<R> Function() action) async {
+    if (_scope != null) return action();
+    final SqlExecutor executor = (await _open()).executor;
+    late _TxScope scope;
+    final R result = await executor.transaction((SqlExecutor tx) {
+      scope = _TxScope(tx);
+      return runZoned(
+        () => action(),
+        zoneValues: <Object, Object>{_txKey: scope},
+      );
+    });
+    _knownTables.addAll(scope.createdTables);
+    return result;
+  }
 
   /// Opens (or returns the already opened) application database.
   ///
@@ -175,12 +263,18 @@ class DataAccess {
   Map<String, dynamic> _rowOf(Object object) =>
       mapToUse((object as dynamic).toMap() as Map<String, dynamic>);
 
-  Future<int> _insertRow(SqlExecutor executor, String table, Object object) {
+  Future<int> _insertRow(
+    SqlExecutor executor,
+    String table,
+    Object object, {
+    bool orReplace = false,
+  }) {
     final Map<String, dynamic> row = _rowOf(object);
     final String columns = row.keys.map(quoteIdentifier).join(', ');
     final String marks = List<String>.filled(row.length, '?').join(', ');
     return executor.insert(
-      'INSERT INTO ${quoteIdentifier(table)} ($columns) VALUES ($marks)',
+      'INSERT${orReplace ? ' OR REPLACE' : ''} INTO ${quoteIdentifier(table)} '
+      '($columns) VALUES ($marks)',
       row.values.map(toSqlValue).toList(),
     );
   }
@@ -190,7 +284,10 @@ class DataAccess {
   /// The table is created on first use if it does not exist yet.
   /// Returns `true` if exactly one row was inserted, `false` otherwise
   /// (null object, missing/renamed columns, constraint violation, ...).
-  Future<bool> insertObjet(Object? object) async {
+  ///
+  /// With [orReplace], a row having the same primary key (or the same value
+  /// in a unique column) is replaced (`INSERT OR REPLACE`).
+  Future<bool> insertObjet(Object? object, {bool orReplace = false}) async {
     if (object == null) return false;
     await createTableIfNotExists(object);
     return _guard('insertObjet', false, () async {
@@ -198,6 +295,7 @@ class DataAccess {
         await _executor(),
         _tableOf(object),
         object,
+        orReplace: orReplace,
       );
       return rowId > 0;
     });
@@ -208,8 +306,13 @@ class DataAccess {
   /// * All objects must be instances of the same entity class.
   /// * Returns `true` if every row was inserted successfully, `false` otherwise
   ///   (null/empty list, missing column, constraint violation, ...).
-  /// * As in 2.0.3, rows inserted before a failing row are kept.
-  Future<bool> insertObjetList(List<Object?>? objectlist) async {
+  /// * As in 2.0.3, rows inserted before a failing row are kept; call it
+  ///   inside [transaction] for all-or-nothing.
+  /// * With [orReplace], rows having the same key are replaced.
+  Future<bool> insertObjetList(
+    List<Object?>? objectlist, {
+    bool orReplace = false,
+  }) async {
     if (objectlist == null || objectlist.isEmpty) return false;
     final Object? first = objectlist.first;
     if (first == null) return false;
@@ -222,7 +325,13 @@ class DataAccess {
       for (final Object? object in objectlist) {
         if (object == null) continue;
         try {
-          if (await _insertRow(tx, table, object) <= 0) return false;
+          final int rowId = await _insertRow(
+            tx,
+            table,
+            object,
+            orReplace: orReplace,
+          );
+          if (rowId <= 0) return false;
         } catch (e, s) {
           if (strict) rethrow;
           _report('insertObjetList', e, s);
@@ -248,7 +357,7 @@ class DataAccess {
     String passwordValue,
   ) async {
     final List<Map<String, Object?>> rows = await (await _executor()).select(
-      'SELECT * FROM ${quoteIdentifier(T.toString())} '
+      'SELECT * FROM ${quoteIdentifier(_tableFor<T>())} '
       'WHERE ${columnRef(identifierColumnName)} = ? '
       'AND ${columnRef(passwordColumnName)} = ?',
       <Object?>[identifierValue, passwordValue],
@@ -287,7 +396,7 @@ class DataAccess {
   ]) async {
     final List<Map<String, Object?>> rows = await _selectWhere(
       '*',
-      quoteIdentifier(T.toString()),
+      quoteIdentifier(_tableFor<T>()),
       afterWhere,
       whereArgs,
     );
@@ -302,7 +411,7 @@ class DataAccess {
   Future<List<T>?> getAll<T>(Object tableEntityInstance) async {
     final List<Map<String, Object?>> rows = await _selectWhere(
       '*',
-      quoteIdentifier(T.toString()),
+      quoteIdentifier(_tableFor<T>()),
       null,
       null,
     );
@@ -322,7 +431,7 @@ class DataAccess {
   ]) async {
     final List<Map<String, Object?>> rows = await _selectWhere(
       '*',
-      quoteIdentifier(T.toString()),
+      quoteIdentifier(_tableFor<T>()),
       afterWhere,
       whereArgs,
     );
@@ -342,7 +451,7 @@ class DataAccess {
   }) => _guard('getAColumnFrom', <C>[], () async {
     final List<Map<String, Object?>> rows = await _selectWhere(
       columnRef(columnName),
-      quoteIdentifier(T.toString()),
+      quoteIdentifier(_tableFor<T>()),
       afterWhere,
       whereArgs,
     );
@@ -401,7 +510,7 @@ class DataAccess {
     List<Object?>? whereArgs,
   }) => _selectWhere(
     listDesColonne,
-    quoteIdentifier(T.toString()),
+    quoteIdentifier(_tableFor<T>()),
     afterWhere,
     whereArgs,
   );
@@ -420,24 +529,55 @@ class DataAccess {
     _report('Entity getter "$getter"', error, stack);
   }
 
-  /// Creates the entity table for [entity] if it does not exist yet.
-  /// Concurrent calls are serialized; a table already seen is not looked up
-  /// again.
+  /// Creates the entity table for [entity] if it does not exist yet, with
+  /// the `indexes` and `uniqueIndexes` it declares (also created on an
+  /// existing table when missing). With [autoAddColumns], adds the columns
+  /// the table lacks. Concurrent calls are serialized; a table already seen
+  /// is not looked up again.
   Future<void> createTableIfNotExists(Object entity) async {
     final String table = _tableOf(entity);
     if (_knownTables.contains(table)) return;
+    final _TxScope? scope = _scope;
+    if (scope != null) {
+      // A transaction already serializes its work; remember the table only
+      // once the transaction commits.
+      if (scope.createdTables.contains(table)) return;
+      await _ensureTable(entity, table);
+      scope.createdTables.add(table);
+      return;
+    }
     final Completer<void> done = Completer<void>();
     final Future<void> previous = _tableLock;
     _tableLock = done.future;
     try {
       await previous;
       if (_knownTables.contains(table)) return;
-      if (!await checkIfTableExists(table)) {
-        await (await _executor()).execute(showCreateTable(entity));
-      }
+      await _ensureTable(entity, table);
       _knownTables.add(table);
     } finally {
       done.complete();
+    }
+  }
+
+  Future<void> _ensureTable(Object entity, String table) async {
+    final SqlExecutor executor = await _executor();
+    final EntitySchema schema = EntitySchema(entity, _getterFailed);
+    if (!await checkIfTableExists(table)) {
+      await executor.execute(buildCreateTable(schema, table));
+    } else if (autoAddColumns) {
+      final Set<String> existing = (await executor.select(
+        'PRAGMA table_info(${quoteAlways(table)})',
+      )).map((Map<String, Object?> row) => row['name']! as String).toSet();
+      for (final String column in schema.columns.keys) {
+        if (existing.contains(column)) continue;
+        await executor.execute(
+          'ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN '
+          '${columnDefinition(schema, column, forAlter: true)}',
+        );
+      }
+    }
+    for (final String statement in buildIndexes(schema, table)) {
+      await executor.execute(statement);
     }
   }
 
@@ -448,14 +588,72 @@ class DataAccess {
   /// A getter that exists but fails is printed and passed to [onError] (and
   /// thrown in [strict] mode); the table is then built without it.
   String showCreateTable(Object entity) =>
-      buildCreateTable(entity, _tableOf(entity), _getterFailed);
+      buildCreateTable(EntitySchema(entity, _getterFailed), _tableOf(entity));
+
+  /// Entities of type [T] matching [where] (`?` placeholders take their
+  /// values from [whereArgs]), sorted by [orderBy] (inserted as is: never
+  /// from user input), [limit] rows from [offset]. Returns `[]` when nothing
+  /// matches.
+  Future<List<T>> query<T>(
+    Object tableEntityInstance, {
+    String? where,
+    List<Object?>? whereArgs,
+    String? orderBy,
+    int? limit,
+    int? offset,
+  }) async {
+    if (limit != null && limit < 0) {
+      throw ArgumentError.value(limit, 'limit', 'must not be negative');
+    }
+    if (offset != null && offset < 0) {
+      throw ArgumentError.value(offset, 'offset', 'must not be negative');
+    }
+    final StringBuffer sql = StringBuffer(
+      'SELECT * FROM ${quoteIdentifier(_tableFor<T>())}${whereClause(where)}',
+    );
+    final List<Object?> args = toSqlValues(whereArgs).toList();
+    if (orderBy != null) sql.write(' ORDER BY $orderBy');
+    if (limit != null || offset != null) {
+      sql.write(' LIMIT ?');
+      args.add(limit ?? -1);
+    }
+    if (offset != null) {
+      sql.write(' OFFSET ?');
+      args.add(offset);
+    }
+    final List<Map<String, Object?>> rows = await (await _executor()).select(
+      sql.toString(),
+      args,
+    );
+    return _entities<T>(tableEntityInstance, rows);
+  }
+
+  /// Runs a SELECT with `?` placeholders bound to [args] and returns the
+  /// rows. Booleans and dates are bound as b012_data stores them.
+  Future<List<Map<String, Object?>>> rawQuery(
+    String sql, [
+    List<Object?>? args,
+  ]) async => (await _executor()).select(sql, toSqlValues(args));
+
+  /// Like [rawQuery], each row read through `fromMap` of
+  /// [tableEntityInstance].
+  Future<List<T>> rawQueryAs<T>(
+    Object tableEntityInstance,
+    String sql, [
+    List<Object?>? args,
+  ]) async => _entities<T>(tableEntityInstance, await rawQuery(sql, args));
+
+  /// Runs any other statement with `?` placeholders bound to [args] and
+  /// returns the number of rows it changed.
+  Future<int> rawExecute(String sql, [List<Object?>? args]) async =>
+      (await _executor()).change(sql, toSqlValues(args));
 
   /// Returns the list of column names of the entity table [T] as currently
   /// stored in SQLite. Useful to detect schema drift (columns added or
   /// removed on the Dart side).
   Future<List<String>> getEntityColumnsName<T>() async {
     final List<Map<String, Object?>> rows = await (await _executor()).select(
-      'PRAGMA table_info(${quoteAlways(T.toString())})',
+      'PRAGMA table_info(${quoteAlways(_tableFor<T>())})',
     );
     return rows
         .map((Map<String, Object?> row) => row['name']! as String)
@@ -473,12 +671,13 @@ class DataAccess {
 
   /// Returns `true` if the entity table [T] exists.
   Future<bool> checkIfEntityTableExists<T>() =>
-      checkIfTableExists(T.toString());
+      checkIfTableExists(_tableFor<T>());
 
   /// Drops the entity table [T] if it exists.
   Future<void> dropTable<T>() async {
-    final String table = T.toString();
+    final String table = _tableFor<T>();
     _knownTables.remove(table);
+    _scope?.createdTables.remove(table);
     await (await _executor()).execute(
       'DROP TABLE IF EXISTS ${quoteIdentifier(table)}',
     );
@@ -511,7 +710,7 @@ class DataAccess {
   }) => _guard('updateSomeColumnsOf', false, () async {
     final String op = joinOperator(whereMcop);
     final int affected = await (await _executor()).change(
-      'UPDATE ${quoteIdentifier(T.toString())} '
+      'UPDATE ${quoteIdentifier(_tableFor<T>())} '
       'SET ${preparedColumns(columnsToUpadate, ',')} '
       'WHERE ${preparedColumns(whereColumns, op)}',
       toSqlValues(values),
@@ -567,7 +766,7 @@ class DataAccess {
   }) async {
     final String op = joinOperator(whereMcop);
     final int affected = await (await _executor()).change(
-      'DELETE FROM ${quoteIdentifier(T.toString())} '
+      'DELETE FROM ${quoteIdentifier(_tableFor<T>())} '
       'WHERE ${preparedColumns(whereColumns, op)}',
       toSqlValues(whereArgs),
     );
@@ -584,7 +783,7 @@ class DataAccess {
     List<Object?>? whereArgs,
   ]) async {
     final int affected = await (await _executor()).change(
-      'DELETE FROM ${quoteIdentifier(T.toString())}${whereClause(afterWhere)}',
+      'DELETE FROM ${quoteIdentifier(_tableFor<T>())}${whereClause(afterWhere)}',
       toSqlValues(whereArgs),
     );
     return affected > 0;
@@ -603,7 +802,7 @@ class DataAccess {
   }) async {
     final List<Map<String, Object?>> rows = await _selectWhere(
       'count($expression) AS countElement',
-      quoteIdentifier(T.toString()),
+      quoteIdentifier(_tableFor<T>()),
       afterWhere,
       whereArgs,
     );
@@ -705,4 +904,14 @@ dynamic boolean(dynamic intOrBool, {bool isInt = true}) {
 DateTime? dateTime(String? dateString) {
   if (dateString == null || dateString.isEmpty) return null;
   return DateTime.tryParse(dateString);
+}
+
+/// The transaction the current zone runs in.
+class _TxScope {
+  _TxScope(this.executor);
+
+  final SqlExecutor executor;
+
+  /// Tables created in this transaction, remembered once it commits.
+  final Set<String> createdTables = <String>{};
 }

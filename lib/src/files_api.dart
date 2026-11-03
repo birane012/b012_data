@@ -43,4 +43,7 @@ abstract class FileStore {
   Future<File?> file({String? fileName, String? path});
 
   Future<bool> internetAvailable();
+
+  /// Names (relative to [filesPath]) of the files saved by name.
+  Future<List<String>> listNames();
 }

@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:typed_data';
 
 import 'package:sqflite_common/sqlite_api.dart' show Database;
 import 'package:sqlite3/wasm.dart';
 import 'package:web/web.dart' as web;
 
+import '../encryption.dart';
 import '../executor.dart';
 
 /// Browser backend over `package:sqlite3` (plan 1 of the 2.1 work showed
@@ -46,7 +48,25 @@ class WebBackend implements Backend {
         : '/$nameOrPath';
     final _WebLock lock = await _WebLock.acquire('b012_data:$path');
     try {
+      final String? key = options.key;
+      if (key != null && _isPlain(engine.fs, path)) {
+        throw StateError(
+          'The database $path is not encrypted: call '
+          'DataAccess.instance.encryptDatabase(key) to encrypt it in place.',
+        );
+      }
       final CommonDatabase db = engine.sqlite.open(path, vfs: engine.vfs);
+      if (key != null) {
+        try {
+          db.execute('PRAGMA key = ${sqlLiteral(key)}');
+          db.select('SELECT count(*) FROM sqlite_master');
+        } catch (_) {
+          db.close();
+          throw StateError(
+            'The encryption key does not open $path (wrong key, or not a database).',
+          );
+        }
+      }
       final WebExecutor executor = WebExecutor(db, engine.fs);
       return OpenedDatabase(
         executor: executor,
@@ -84,6 +104,43 @@ class WebBackend implements Backend {
       if (engine.fs.xAccess(file, 0) != 0) engine.fs.xDelete(file, 0);
     }
     await engine.fs.flush();
+  }
+
+  static bool _isPlain(IndexedDbFileSystem fs, String path) {
+    if (fs.xAccess(path, 0) == 0) return false;
+    final VirtualFileSystemFile file = fs
+        .xOpen(Sqlite3Filename(path), SqlFlag.SQLITE_OPEN_READONLY)
+        .file;
+    try {
+      if (file.xFileSize() < sqliteHeader.length) return false;
+      final Uint8List head = Uint8List(sqliteHeader.length);
+      file.xRead(head, 0);
+      return isPlainSqlite(head);
+    } finally {
+      file.xClose();
+    }
+  }
+
+  @override
+  Future<void> encryptInPlace(String name, String key) async {
+    final _Engine engine = await _engine(Uri.parse('sqlite3mc.wasm'));
+    final String path = name.startsWith('/') ? name : '/$name';
+    if (!_isPlain(engine.fs, path)) return;
+    final _WebLock lock = await _WebLock.acquire('b012_data:$path');
+    try {
+      final CommonDatabase db = engine.sqlite.open(path, vfs: engine.vfs);
+      try {
+        db.execute('PRAGMA rekey = ${sqlLiteral(key)}');
+      } finally {
+        db.close();
+      }
+      await engine.fs.flush();
+    } finally {
+      lock.release();
+    }
+    if (_isPlain(engine.fs, path)) {
+      throw StateError('The database $path could not be encrypted.');
+    }
   }
 
   @override

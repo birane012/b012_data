@@ -7,6 +7,8 @@ import 'package:flutter/widgets.dart';
 
 import 'package:b012_data/b012_sqlflite_easy.dart';
 
+import 'src/crypto_files.dart';
+import 'src/encryption.dart';
 import 'src/files.dart';
 import 'src/files_api.dart';
 import 'src/sql.dart' show columnRef;
@@ -37,7 +39,9 @@ enum DataType {
 ///
 /// Access the singleton through [DiscData.instance].
 class DiscData {
-  DiscData._internal();
+  DiscData._internal() {
+    EncryptionHooks.encryptExistingFiles = _encryptExisting;
+  }
 
   /// Global singleton instance.
   static final DiscData instance = DiscData._internal();
@@ -103,6 +107,10 @@ class DiscData {
   ///   bytes, `DataType.bytes` stores it as a `Uint8List`.
   /// * The file is written all at once: a reader sees the old content or the
   ///   new one, never half of it.
+  /// * When the database is encrypted ([DataAccess.useEncryptionKey]), a
+  ///   file saved by name is encrypted (AES-256-GCM); a file written at an
+  ///   explicit [path] (an export, for instance) is written as is unless
+  ///   [encrypt] is `true`.
   ///
   /// Returns the file name actually used, or `null` when [data] is null /
   /// empty.
@@ -112,6 +120,7 @@ class DiscData {
     String? takeThisName,
     String? path,
     bool recursive = false,
+    bool? encrypt,
   }) async {
     if (data == null) return null;
     if (data is String && data.isEmpty) return null;
@@ -128,7 +137,7 @@ class DiscData {
 
     final String? validated = validatePath(path);
     await _store.write(
-      _bytesOf(data, dataType),
+      await _seal(_bytesOf(data, dataType), encrypt ?? validated == null),
       fileName: validated == null ? fileName : null,
       path: validated,
       recursive: recursive,
@@ -154,11 +163,57 @@ class DiscData {
     if (data == null) return;
     if (data is String && data.isEmpty) return;
     if (data is List && data.isEmpty) return;
-    await _store.append(
-      _bytesOf(data, dataType),
+    final String? validated = validatePath(path);
+    final Uint8List? current = await _store.read(
       fileName: fileName,
-      path: validatePath(path),
+      path: validated,
     );
+    if (current == null) return;
+    if (!isEncryptedFile(current)) {
+      await _store.append(
+        _bytesOf(data, dataType),
+        fileName: fileName,
+        path: validated,
+      );
+      return;
+    }
+    final Uint8List clear = await _open(current);
+    await _store.write(
+      await _seal(<int>[...clear, ..._bytesOf(data, dataType)], true),
+      fileName: validated == null ? fileName : null,
+      path: validated,
+      recursive: true,
+    );
+  }
+
+  /// [bytes] encrypted when [wanted] and a key is in use.
+  Future<List<int>> _seal(List<int> bytes, bool wanted) async {
+    if (!wanted) return bytes;
+    final Uint8List? key = await EncryptionHooks.fileKey?.call();
+    return key == null ? bytes : sealFile(bytes, key);
+  }
+
+  /// The clear content of an encrypted file.
+  Future<Uint8List> _open(Uint8List sealed) async {
+    final Uint8List? key = await EncryptionHooks.fileKey?.call();
+    if (key == null) {
+      throw StateError(
+        'This file is encrypted: set the key with '
+        'DataAccess.instance.useEncryptionKey first.',
+      );
+    }
+    return openFile(sealed, key);
+  }
+
+  /// Encrypts the unencrypted files saved by name.
+  Future<void> _encryptExisting() async {
+    final Uint8List? key = await EncryptionHooks.fileKey?.call();
+    if (key == null) return;
+    for (final String name in await _store.listNames()) {
+      final Uint8List? bytes = await _store.read(fileName: name);
+      if (bytes == null || isEncryptedFile(bytes)) continue;
+      await _store.write(await sealFile(bytes, key), fileName: name);
+    }
   }
 
   /// Normalizes a file system [path] so it can be safely consumed by `dart:io`.
@@ -194,8 +249,16 @@ class DiscData {
 
   /// Reads the file and returns its raw bytes.
   /// Returns `null` when the file does not exist.
-  Future<Uint8List?> readFileAsBytes({String? fileName, String? path}) =>
-      _store.read(fileName: fileName, path: validatePath(path));
+  ///
+  /// An encrypted file is decrypted (the key must be in use).
+  Future<Uint8List?> readFileAsBytes({String? fileName, String? path}) async {
+    final Uint8List? bytes = await _store.read(
+      fileName: fileName,
+      path: validatePath(path),
+    );
+    if (bytes == null || !isEncryptedFile(bytes)) return bytes;
+    return _open(bytes);
+  }
 
   /// Reads the file and returns its UTF-8 content.
   /// Returns `null` when the file does not exist.
@@ -208,7 +271,9 @@ class DiscData {
   }
 
   /// Returns the file handle, or `null` when the file does not exist
-  /// (always `null` in a browser, which has no file system).
+  /// (always `null` in a browser, which has no file system). The file is
+  /// returned as stored: encrypted when the database is; read it with
+  /// [readFileAsBytes] or [readFileAsString], which decrypt.
   Future<File?> getFile({String? fileName, String? path}) =>
       _store.file(fileName: fileName, path: validatePath(path));
 

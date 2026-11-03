@@ -105,6 +105,17 @@ class NativeFileStore implements FileStore {
   }
 
   @override
+  Future<List<String>> listNames() async {
+    final Directory dir = Directory(await filesPath);
+    if (!await dir.exists()) return <String>[];
+    return <String>[
+      await for (final FileSystemEntity e in dir.list(recursive: true))
+        if (e is File && !e.path.endsWith('.b012tmp'))
+          p.relative(e.path, from: dir.path),
+    ];
+  }
+
+  @override
   Future<bool> internetAvailable() async {
     try {
       final List<InternetAddress> result = await InternetAddress.lookup(

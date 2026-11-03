@@ -5,7 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
 import 'src/backend.dart';
+import 'package:b012_data/b012_disc_data.dart';
+
 import 'src/column_type.dart';
+import 'src/encryption.dart';
 import 'src/executor.dart';
 import 'src/schema.dart';
 import 'src/sql.dart';
@@ -35,7 +38,9 @@ typedef B012ErrorHandler = void Function(Object error, StackTrace stack);
 ///
 /// See the package README for a complete usage example.
 class DataAccess {
-  DataAccess._internal();
+  DataAccess._internal() {
+    EncryptionHooks.fileKey = _fileKey;
+  }
 
   /// Global singleton instance.
   static final DataAccess instance = DataAccess._internal();
@@ -55,6 +60,8 @@ class DataAccess {
   final Set<String> _knownTables = <String>{};
   Future<void> _tableLock = Future<void>.value();
   int _openCount = 0;
+  String? _key;
+  Uint8List? _fileKeyCache;
   final Map<Type, String> _registry = <Type, String>{};
   static final Object _txKey = Object();
 
@@ -92,6 +99,90 @@ class DataAccess {
   /// unencrypted databases). `dart run b012_data:setup_web` puts it in the
   /// application's `web/` folder.
   Uri? webSqliteWasmUri;
+
+  /// Whether the application database is opened with an encryption key.
+  bool get encryptionEnabled => _key != null;
+
+  /// Opens the application database with [key] from now on (`null`: no
+  /// key). The database currently open is closed; the next access reopens
+  /// it.
+  ///
+  /// * A new database is created encrypted (SQLite3MultipleCiphers).
+  /// * An existing encrypted database opens only with its key; a wrong key
+  ///   throws a [StateError].
+  /// * An existing unencrypted database is refused with a [StateError]:
+  ///   call [encryptDatabase] to encrypt it in place.
+  /// * The engine is checked first: if it does not encrypt, opening throws
+  ///   a [StateError] explaining what to add to the application's
+  ///   `pubspec.yaml`. A database is never created in plaintext by mistake.
+  ///
+  /// On Android and iOS an encrypted database goes through the SQLite
+  /// bundled by `package:sqlite3`, not the system one. The key is never
+  /// stored by b012_data: the application provides it at each start. Files
+  /// saved by name with [DiscData] are encrypted too (AES-256-GCM).
+  Future<void> useEncryptionKey(String? key) async {
+    await closeDB();
+    _key = key;
+    _fileKeyCache = null;
+  }
+
+  /// Encrypts in place, with [key], the unencrypted application database
+  /// and the files saved by name with [DiscData], then keeps using [key].
+  /// Safe to call again after an interruption: what is already encrypted is
+  /// kept, the rest is encrypted.
+  Future<void> encryptDatabase(String key) async {
+    final String name = await _currentDatabaseName();
+    await closeDB();
+    await _backend.encryptInPlace(name, key);
+    _key = key;
+    _fileKeyCache = null;
+    DiscData.instance;
+    await EncryptionHooks.encryptExistingFiles?.call();
+  }
+
+  /// Changes the key of the encrypted application database. Files keep
+  /// their own key, stored inside the encrypted database, so they need no
+  /// rewriting.
+  Future<void> changeEncryptionKey(String newKey) async {
+    if (_key == null) {
+      throw StateError(
+        'No encryption key in use: call useEncryptionKey first.',
+      );
+    }
+    if (_scope != null) {
+      throw StateError('The key cannot change inside a transaction.');
+    }
+    await (await _open()).executor.execute(
+      'PRAGMA rekey = ${sqlLiteral(newKey)}',
+    );
+    _key = newKey;
+  }
+
+  /// The key of the files: random, kept in the encrypted database.
+  Future<Uint8List?> _fileKey() async {
+    if (_key == null) return null;
+    final Uint8List? cached = _fileKeyCache;
+    if (cached != null) return cached;
+    final SqlExecutor executor = await _executor();
+    await executor.execute(
+      'CREATE TABLE IF NOT EXISTS b012_meta (k TEXT PRIMARY KEY, v BLOB)',
+    );
+    final List<Map<String, Object?>> rows = await executor.select(
+      "SELECT v FROM b012_meta WHERE k = 'files'",
+    );
+    if (rows.isNotEmpty) {
+      return _fileKeyCache = Uint8List.fromList(rows.first['v']! as List<int>);
+    }
+    final Random random = Random.secure();
+    final Uint8List key = Uint8List.fromList(
+      List<int>.generate(32, (_) => random.nextInt(256)),
+    );
+    await executor.insert(
+      "INSERT INTO b012_meta (k, v) VALUES ('files', ?)",
+      <Object?>[key],
+    );
+    return _fileKeyCache = key;
+  }
 
   /// Forgets every registration (tests only).
   @visibleForTesting
@@ -133,7 +224,7 @@ class DataAccess {
     final String dbName = name ?? await _currentDatabaseName();
     final OpenedDatabase opened = await _backend.open(
       dbName,
-      OpenOptions(webWasmUri: webSqliteWasmUri),
+      OpenOptions(key: _key, webWasmUri: webSqliteWasmUri),
     );
     try {
       if (enforceForeignKeys) {
@@ -839,7 +930,8 @@ class DataAccess {
     final List<String> tables = await getAColumnFromWithTableName<String>(
       'name',
       'sqlite_master',
-      afterWhere: "type='table' AND name NOT LIKE 'sqlite_%'",
+      afterWhere:
+          "type='table' AND name NOT LIKE 'sqlite_%' AND name <> 'b012_meta'",
     );
     final SqlExecutor executor = await _executor();
     await executor.transaction((SqlExecutor tx) async {

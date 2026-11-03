@@ -68,4 +68,8 @@ abstract class Backend {
 
   /// Remembers [name] as the application database.
   Future<void> writePointer(String name);
+
+  /// Encrypts in place the unencrypted application database [name] with
+  /// [key]. Does nothing when it does not exist or is already encrypted.
+  Future<void> encryptInPlace(String name, String key);
 }

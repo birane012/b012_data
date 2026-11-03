@@ -1,8 +1,10 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' show databaseFactorySqflitePlugin;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../encryption.dart';
 import '../executor.dart';
 import 'locations.dart';
 
@@ -18,8 +20,107 @@ class NativeBackend implements Backend {
   DatabaseFactory get factory =>
       _needsFfi ? databaseFactoryFfi : databaseFactorySqflitePlugin;
 
+  Future<DatabaseFactory>? _encrypting;
+
+  /// `sqflite_common_ffi` over the SQLite bundled by `package:sqlite3`,
+  /// once checked to be SQLite3MultipleCiphers. On Android and iOS too: an
+  /// encrypted database never goes through the system SQLite.
+  Future<DatabaseFactory> _encryptingFactory() => _encrypting ??=
+      () async {
+        sqfliteFfiInit();
+        final Database probe = await databaseFactoryFfi.openDatabase(
+          inMemoryDatabasePath,
+          options: OpenDatabaseOptions(singleInstance: false),
+        );
+        try {
+          requireEncryptingEngine(await probe.rawQuery('PRAGMA cipher'));
+        } finally {
+          await probe.close();
+        }
+        return databaseFactoryFfi;
+      }().catchError((Object e) {
+        _encrypting = null;
+        throw e;
+      });
+
+  /// The absolute path of the application database [name].
+  Future<String> _absolutePath(String name) async {
+    final String resolved = await Locations.instance.resolveDatabase(name);
+    if (p.isAbsolute(resolved)) return resolved;
+    return p.join(
+      await databaseFactorySqflitePlugin.getDatabasesPath(),
+      resolved,
+    );
+  }
+
+  static Future<bool> _isPlain(String path) async {
+    final File file = File(path);
+    if (!await file.exists() || await file.length() < sqliteHeader.length) {
+      return false;
+    }
+    final RandomAccessFile raf = await file.open();
+    try {
+      return isPlainSqlite(await raf.read(sqliteHeader.length));
+    } finally {
+      await raf.close();
+    }
+  }
+
+  Future<OpenedDatabase> _openEncrypted(String name, String key) async {
+    final DatabaseFactory ffi = await _encryptingFactory();
+    final String path = await _absolutePath(name);
+    if (await _isPlain(path)) {
+      throw StateError(
+        'The database $path is not encrypted: call '
+        'DataAccess.instance.encryptDatabase(key) to encrypt it in place.',
+      );
+    }
+    final Database db = await ffi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        onConfigure: (Database d) =>
+            d.execute('PRAGMA key = ${sqlLiteral(key)}'),
+      ),
+    );
+    try {
+      await db.rawQuery('SELECT count(*) FROM sqlite_master');
+    } catch (_) {
+      await db.close();
+      throw StateError(
+        'The encryption key does not open $path (wrong key, or not a database).',
+      );
+    }
+    return OpenedDatabase(
+      executor: NativeExecutor(db),
+      database: db,
+      path: db.path,
+      close: db.close,
+    );
+  }
+
+  @override
+  Future<void> encryptInPlace(String name, String key) async {
+    final String path = await _absolutePath(name);
+    if (!await _isPlain(path)) return;
+    final DatabaseFactory ffi = await _encryptingFactory();
+    final Database db = await ffi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(singleInstance: false),
+    );
+    try {
+      await db.rawQuery('PRAGMA rekey = ${sqlLiteral(key)}');
+    } finally {
+      await db.close();
+    }
+    if (await _isPlain(path)) {
+      throw StateError('The database $path could not be encrypted.');
+    }
+  }
+
   @override
   Future<OpenedDatabase> open(String nameOrPath, OpenOptions options) async {
+    final String? key = options.key;
+    if (key != null) return _openEncrypted(nameOrPath, key);
     final String path = await Locations.instance.resolveDatabase(nameOrPath);
     final Database db = await factory.openDatabase(path);
     return OpenedDatabase(

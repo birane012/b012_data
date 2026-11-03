@@ -1,5 +1,9 @@
 # The web check application has its own lints: it does not depend on
 # flutter_lints.
+analyzer:
+  exclude:
+    - build/**
+    - web/**
 linter:
   rules:
     - avoid_print

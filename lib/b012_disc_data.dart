@@ -8,6 +8,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:b012_data/b012_sqlflite_easy.dart';
 
+import 'src/sql.dart' show columnRef;
+
 /// Describes the kind of data stored in / read from a file on disk.
 enum DataType {
   /// Plain text (UTF-8 string).
@@ -43,8 +45,7 @@ class DiscData {
   ///
   /// On Windows the user has direct access to the folder, so the directory
   /// is prefixed with a dot (`.files`) to discourage accidental deletion.
-  final String _defaultFilesDirectory =
-      Platform.isWindows ? '.files' : 'files';
+  final String _defaultFilesDirectory = Platform.isWindows ? '.files' : 'files';
 
   /// Root directory for the current application. Equivalent to
   /// `getApplicationDocumentsDirectory().path`.
@@ -58,8 +59,7 @@ class DiscData {
   /// The directory is **not** created on disk automatically - create it from
   /// the client code if you want to make sure it exists before writing.
   Future<String> get databasesPath async {
-    _databasesPath ??=
-        '${getParentDir(await rootPath)}${pathJoin}databases';
+    _databasesPath ??= '${getParentDir(await rootPath)}${pathJoin}databases';
     return _databasesPath!;
   }
 
@@ -123,8 +123,8 @@ class DiscData {
 
     if (Platform.isWindows) fileName = fileName.replaceAll(':', '');
 
-    final String resolved = validatePath(path) ??
-        '${await filesPath}$pathJoin$fileName';
+    final String resolved =
+        validatePath(path) ?? '${await filesPath}$pathJoin$fileName';
     final File file = File(resolved);
     file.createSync(recursive: recursive);
 
@@ -266,8 +266,10 @@ class DiscData {
         (path == null || path.isEmpty)) {
       return null;
     }
-    final Uint8List? bytes =
-        await readFileAsBytes(fileName: imageName, path: path);
+    final Uint8List? bytes = await readFileAsBytes(
+      fileName: imageName,
+      path: path,
+    );
     if (bytes == null) return null;
     return Image.memory(bytes, fit: fit);
   }
@@ -291,15 +293,16 @@ class DiscData {
     Object value, {
     String? path,
   }) async {
-    final List<String> urls = await DataAccess.instance.getAColumnFrom<String, T>(
-      urlColumnName,
-      afterWhere: "$key = '$value' LIMIT 1",
-    );
+    final List<String> urls = await DataAccess.instance
+        .getAColumnFrom<String, T>(
+          urlColumnName,
+          afterWhere: '${columnRef(key)} = ? LIMIT 1',
+          whereArgs: <Object?>[value],
+        );
     if (urls.isEmpty) return null;
     final String fileRef = urls.first;
 
-    final String? filePath =
-        path != null ? '$path$pathJoin$fileRef' : null;
+    final String? filePath = path != null ? '$path$pathJoin$fileRef' : null;
 
     if (D == Uint8List) {
       final Uint8List? bytes = filePath != null
@@ -333,8 +336,9 @@ class DiscData {
 /// * any [SocketException] is thrown during the lookup.
 Future<bool> get isInternetAvailable async {
   try {
-    final List<InternetAddress> result =
-        await InternetAddress.lookup('google.com');
+    final List<InternetAddress> result = await InternetAddress.lookup(
+      'google.com',
+    );
     return result.isNotEmpty && result.first.rawAddress.isNotEmpty;
   } on SocketException {
     return false;

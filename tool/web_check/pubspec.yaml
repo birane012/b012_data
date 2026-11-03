@@ -1,0 +1,17 @@
+name: web_check
+description: Checks b012_data in a real browser (run with flutter run -d web-server).
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ">=3.12.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  b012_data:
+    path: ../..
+  web: ^1.1.0
+
+flutter:
+  uses-material-design: true

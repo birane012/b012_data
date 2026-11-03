@@ -31,3 +31,7 @@ android/
 build/
 linux/
 windows/
+
+# Web check application (tool/web_check): downloaded modules and lock file
+tool/web_check/pubspec.lock
+tool/web_check/web/*.wasm

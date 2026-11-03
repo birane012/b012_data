@@ -87,6 +87,12 @@ class DataAccess {
   /// to the next.
   void registerEntity<T>(String tableName) => _registry[T] = tableName;
 
+  /// In a browser, the WebAssembly SQLite to load, relative to the page.
+  /// Defaults to `sqlite3mc.wasm` (SQLite3MultipleCiphers, which also opens
+  /// unencrypted databases). `dart run b012_data:setup_web` puts it in the
+  /// application's `web/` folder.
+  Uri? webSqliteWasmUri;
+
   /// Forgets every registration (tests only).
   @visibleForTesting
   void debugClearRegistry() => _registry.clear();
@@ -125,7 +131,10 @@ class DataAccess {
 
   Future<OpenedDatabase> _openApplicationDatabase({String? name}) async {
     final String dbName = name ?? await _currentDatabaseName();
-    final OpenedDatabase opened = await _backend.open(dbName);
+    final OpenedDatabase opened = await _backend.open(
+      dbName,
+      OpenOptions(webWasmUri: webSqliteWasmUri),
+    );
     try {
       if (enforceForeignKeys) {
         await opened.executor.execute('PRAGMA foreign_keys = ON');
@@ -167,9 +176,24 @@ class DataAccess {
       _scope?.executor ?? (await _open()).executor;
 
   String _tableOf(Object entity) =>
-      _registry[entity.runtimeType] ?? entity.runtimeType.toString();
+      _registry[entity.runtimeType] ?? _unregistered(entity.runtimeType);
 
-  String _tableFor<T>() => _registry[T] ?? T.toString();
+  String _tableFor<T>() => _registry[T] ?? _unregistered(T);
+
+  /// The class name, as in 2.0.3 — except in a browser, where release builds
+  /// shorten class names: a table named after its class would change with an
+  /// update of the application.
+  String _unregistered(Type type) {
+    if (kIsWeb) {
+      throw StateError(
+        'In a browser every entity must be registered, for instance '
+        "DataAccess.instance.registerEntity<Person>('person'): release builds "
+        'shorten class names, so a table named after its class would change '
+        'with an update ($type is not registered).',
+      );
+    }
+    return type.toString();
+  }
 
   /// Runs [action] in a transaction: everything or nothing. The [DataAccess]
   /// methods called inside [action] take part in it; a transaction started

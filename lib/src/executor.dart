@@ -41,10 +41,21 @@ class OpenedDatabase {
   final Future<void> Function() close;
 }
 
+/// How to open the application database.
+class OpenOptions {
+  const OpenOptions({this.key, this.webWasmUri});
+
+  /// The encryption key, or `null` for an unencrypted database.
+  final String? key;
+
+  /// In a browser, the WebAssembly SQLite to load.
+  final Uri? webWasmUri;
+}
+
 /// Opens and deletes databases on one platform family.
 abstract class Backend {
   /// Opens the application database named or located at [nameOrPath].
-  Future<OpenedDatabase> open(String nameOrPath);
+  Future<OpenedDatabase> open(String nameOrPath, OpenOptions options);
 
   /// Opens a separate sqflite database (`DataAccess.openDB`).
   Future<Database> openRaw(String path);

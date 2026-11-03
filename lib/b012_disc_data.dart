@@ -1,15 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' show File, FileSystemException;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:path/path.dart' as p;
 
 import 'package:b012_data/b012_sqlflite_easy.dart';
 
-import 'src/native/atomic_file.dart';
-import 'src/native/locations.dart';
+import 'src/files.dart';
+import 'src/files_api.dart';
 import 'src/sql.dart' show columnRef;
 
 /// Describes the kind of data stored in / read from a file on disk.
@@ -24,13 +23,17 @@ enum DataType {
   bytes,
 }
 
-/// High-level API for reading/writing files on disk, abstracting away the
+/// High-level API for reading/writing files, abstracting away the
 /// per-platform differences (path separators, default root directory,
-/// hidden-directory conventions, ...).
+/// hidden-directory conventions, browser storage, ...).
 ///
 /// Files are read and written asynchronously; a file is written all at once
 /// (a reader never sees half of it), and a file *name* can never point
 /// outside [filesPath].
+///
+/// In a browser, files live in IndexedDB, next to the database: the methods
+/// that read and write bytes, text or base64 work the same; [getFile], which
+/// returns a `dart:io` file, returns `null`.
 ///
 /// Access the singleton through [DiscData.instance].
 class DiscData {
@@ -39,19 +42,21 @@ class DiscData {
   /// Global singleton instance.
   static final DiscData instance = DiscData._internal();
 
+  final FileStore _store = createFileStore();
+
   /// Platform path separator (`'\'` on Windows, `'/'` elsewhere).
-  final String pathJoin = !kIsWeb && Platform.isWindows ? r'\' : '/';
+  late final String pathJoin = _store.separator;
 
   /// Root directory for the current application. Equivalent to
-  /// `getApplicationDocumentsDirectory().path`.
-  Future<String> get rootPath => Locations.instance.documentsDir;
+  /// `getApplicationDocumentsDirectory().path` (`/` in a browser).
+  Future<String> get rootPath => _store.rootPath;
 
   /// Directory holding the `dbName` file of [DataAccess.changeDB].
   ///
   /// * Android, iOS, macOS: `<parent of Documents>/databases`, as before.
   /// * Windows, Linux: `<application support>/databases`, where the
   ///   databases of a new installation live too.
-  Future<String> get databasesPath => Locations.instance.databasesDir;
+  Future<String> get databasesPath => _store.databasesPath;
 
   /// Directory used to store user-facing files saved by the package.
   ///
@@ -60,16 +65,17 @@ class DiscData {
   ///   an application that kept its 2.0.3 database keeps its 2.0.3 folder
   ///   (`<parent of Documents>/.files` on Windows, `files` on Linux). Files
   ///   saved there by 2.0.3 remain readable by name either way.
-  Future<String> get filesPath => Locations.instance.filesDir;
+  /// * Browser: `/files`, a name space inside IndexedDB.
+  Future<String> get filesPath => _store.filesPath;
 
   /// Forgets the cached folders (tests only).
   @visibleForTesting
-  void debugResetPaths() => Locations.instance.reset();
+  void debugResetPaths() => _store.reset();
 
   /// Returns `true` if the file identified by [fileName] (relative to
-  /// [filesPath]) or by the absolute [path] exists on disk.
-  Future<bool> checkFileExists({String? fileName, String? path}) async =>
-      (await _existing(fileName, path)).exists();
+  /// [filesPath]) or by the absolute [path] exists.
+  Future<bool> checkFileExists({String? fileName, String? path}) =>
+      _store.exists(fileName: fileName, path: validatePath(path));
 
   /// Returns the parent directory of [path], computed by stripping the last
   /// component from the path.
@@ -81,7 +87,7 @@ class DiscData {
   String getParentDir(String path) =>
       (path.split(pathJoin)..removeLast()).join(pathJoin);
 
-  /// Writes [data] to disk.
+  /// Writes [data].
   ///
   /// * If [path] is provided, the data is written to that absolute path and
   ///   the file name is derived from it. When [recursive] is `true`, any
@@ -118,27 +124,19 @@ class DiscData {
       fileName = takeThisName ?? DateTime.now().toIso8601String();
     }
 
-    if (!kIsWeb && Platform.isWindows) fileName = fileName.replaceAll(':', '');
+    if (pathJoin == r'\') fileName = fileName.replaceAll(':', '');
 
-    final File file;
     final String? validated = validatePath(path);
-    if (validated != null) {
-      file = File(validated);
-      if (!recursive && !await file.parent.exists()) {
-        throw PathNotFoundException(
-          validated,
-          const OSError('The parent directory does not exist'),
-          'Cannot create file',
-        );
-      }
-    } else {
-      file = File(_inFolder(await filesPath, fileName));
-    }
-    await writeAtomically(file, _bytesOf(data, dataType));
+    await _store.write(
+      _bytesOf(data, dataType),
+      fileName: validated == null ? fileName : null,
+      path: validated,
+      recursive: recursive,
+    );
     return fileName;
   }
 
-  /// Appends [data] to an existing file on disk.
+  /// Appends [data] to an existing file.
   ///
   /// * When [path] is provided it takes precedence over [fileName].
   /// * Otherwise the file is looked up inside [filesPath] using [fileName].
@@ -156,13 +154,10 @@ class DiscData {
     if (data == null) return;
     if (data is String && data.isEmpty) return;
     if (data is List && data.isEmpty) return;
-
-    final File file = await _existing(fileName, path);
-    if (!await file.exists()) return;
-    await file.writeAsBytes(
+    await _store.append(
       _bytesOf(data, dataType),
-      mode: FileMode.append,
-      flush: true,
+      fileName: fileName,
+      path: validatePath(path),
     );
   }
 
@@ -199,11 +194,8 @@ class DiscData {
 
   /// Reads the file and returns its raw bytes.
   /// Returns `null` when the file does not exist.
-  Future<Uint8List?> readFileAsBytes({String? fileName, String? path}) async {
-    final File file = await _existing(fileName, path);
-    if (!await file.exists()) return null;
-    return file.readAsBytes();
-  }
+  Future<Uint8List?> readFileAsBytes({String? fileName, String? path}) =>
+      _store.read(fileName: fileName, path: validatePath(path));
 
   /// Reads the file and returns its UTF-8 content.
   /// Returns `null` when the file does not exist.
@@ -215,29 +207,25 @@ class DiscData {
     return bytes == null ? null : utf8.decode(bytes);
   }
 
-  /// Returns the file handle, or `null` when the file does not exist.
-  Future<File?> getFile({String? fileName, String? path}) async {
-    final File file = await _existing(fileName, path);
-    return await file.exists() ? file : null;
-  }
+  /// Returns the file handle, or `null` when the file does not exist
+  /// (always `null` in a browser, which has no file system).
+  Future<File?> getFile({String? fileName, String? path}) =>
+      _store.file(fileName: fileName, path: validatePath(path));
 
-  /// Deletes a file on disk.
+  /// Deletes a file.
   ///
   /// Returns `true` if the file did not exist or was successfully deleted,
   /// and `false` if the deletion failed.
   Future<bool> deleteFile({String? fileName, String? path}) async {
-    final File file = await _existing(fileName, path);
-    if (!await file.exists()) return true;
     try {
-      await file.delete();
-      return !await file.exists();
+      return await _store.delete(fileName: fileName, path: validatePath(path));
     } on FileSystemException catch (e, s) {
       debugPrint('deleteFile failed: $e\n$s');
       return false;
     }
   }
 
-  /// Loads an image from disk and returns an [Image] widget.
+  /// Loads an image and returns an [Image] widget.
   ///
   /// Returns `null` when [imageName] is null/empty or when the file cannot
   /// be found.
@@ -314,45 +302,12 @@ class DiscData {
         return data as List<int>;
     }
   }
-
-  /// [name] inside [folder]; a name that would leave it throws.
-  String _inFolder(String folder, String name) {
-    if (name.isEmpty) return folder;
-    final String target = p.normalize(p.join(folder, name));
-    if (!p.isWithin(folder, target)) {
-      throw ArgumentError.value(name, 'fileName', 'must stay inside $folder');
-    }
-    return target;
-  }
-
-  /// The file designated by an explicit [path], or by [fileName] in
-  /// [filesPath] — or, when it is not there, in the 2.0.3 folder.
-  Future<File> _existing(String? fileName, String? path) async {
-    final String? validated = validatePath(path);
-    if (validated != null) return File(validated);
-    final String name = fileName ?? '';
-    final File primary = File(_inFolder(await filesPath, name));
-    if (name.isEmpty || await primary.exists()) return primary;
-    final String? fallback = await Locations.instance.fallbackFilesDir;
-    if (fallback == null) return primary;
-    final File old = File(_inFolder(fallback, name));
-    return await old.exists() ? old : primary;
-  }
 }
 
-/// Convenience probe that pings `google.com` to check for internet access.
+/// Whether internet looks reachable: a DNS lookup of `google.com` on native
+/// platforms, the browser's network state in a browser.
 ///
-/// Returns `false` when:
-/// * the host cannot be resolved (no DNS),
-/// * resolution succeeds but the result is empty,
-/// * any [SocketException] is thrown during the lookup.
-Future<bool> get isInternetAvailable async {
-  try {
-    final List<InternetAddress> result = await InternetAddress.lookup(
-      'google.com',
-    );
-    return result.isNotEmpty && result.first.rawAddress.isNotEmpty;
-  } on SocketException {
-    return false;
-  }
-}
+/// Returns `false` when the host cannot be resolved, when the result is
+/// empty, or on a socket error.
+Future<bool> get isInternetAvailable =>
+    DiscData.instance._store.internetAvailable();

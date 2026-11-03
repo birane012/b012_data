@@ -19,7 +19,7 @@ class NativeBackend implements Backend {
       _needsFfi ? databaseFactoryFfi : databaseFactorySqflitePlugin;
 
   @override
-  Future<OpenedDatabase> open(String nameOrPath) async {
+  Future<OpenedDatabase> open(String nameOrPath, OpenOptions options) async {
     final String path = await Locations.instance.resolveDatabase(nameOrPath);
     final Database db = await factory.openDatabase(path);
     return OpenedDatabase(

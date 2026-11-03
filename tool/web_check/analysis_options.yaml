@@ -1,0 +1,6 @@
+# The web check application has its own lints: it does not depend on
+# flutter_lints.
+linter:
+  rules:
+    - avoid_print
+    - prefer_single_quotes

@@ -49,6 +49,9 @@ class WebBackend implements Backend {
     final _WebLock lock = await _WebLock.acquire('b012_data:$path');
     try {
       final String? key = options.key;
+      if (key == null && _isProtected(engine.fs, path)) {
+        throw StateError(keyNeeded(path));
+      }
       if (key != null && _isPlain(engine.fs, path)) {
         throw StateError(
           'The database $path is not encrypted: call '
@@ -104,6 +107,26 @@ class WebBackend implements Backend {
       if (engine.fs.xAccess(file, 0) != 0) engine.fs.xDelete(file, 0);
     }
     await engine.fs.flush();
+  }
+
+  static bool _isProtected(IndexedDbFileSystem fs, String path) {
+    final Uint8List? head = _head(fs, path);
+    return head != null && !isPlainSqlite(head);
+  }
+
+  static Uint8List? _head(IndexedDbFileSystem fs, String path) {
+    if (fs.xAccess(path, 0) == 0) return null;
+    final VirtualFileSystemFile file = fs
+        .xOpen(Sqlite3Filename(path), SqlFlag.SQLITE_OPEN_READONLY)
+        .file;
+    try {
+      if (file.xFileSize() < sqliteHeader.length) return null;
+      final Uint8List head = Uint8List(sqliteHeader.length);
+      file.xRead(head, 0);
+      return head;
+    } finally {
+      file.xClose();
+    }
   }
 
   static bool _isPlain(IndexedDbFileSystem fs, String path) {

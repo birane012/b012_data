@@ -53,6 +53,22 @@ class NativeBackend implements Backend {
     );
   }
 
+  /// Whether [path] holds something that is not plain SQLite (an encrypted
+  /// database, typically). Opening it without its key through the system
+  /// SQLite of Android would erase it, as a corrupt file.
+  static Future<bool> _isProtected(String path) async {
+    final File file = File(path);
+    if (!await file.exists() || await file.length() < sqliteHeader.length) {
+      return false;
+    }
+    final RandomAccessFile raf = await file.open();
+    try {
+      return !isPlainSqlite(await raf.read(sqliteHeader.length));
+    } finally {
+      await raf.close();
+    }
+  }
+
   static Future<bool> _isPlain(String path) async {
     final File file = File(path);
     if (!await file.exists() || await file.length() < sqliteHeader.length) {
@@ -121,6 +137,8 @@ class NativeBackend implements Backend {
   Future<OpenedDatabase> open(String nameOrPath, OpenOptions options) async {
     final String? key = options.key;
     if (key != null) return _openEncrypted(nameOrPath, key);
+    final String absolute = await _absolutePath(nameOrPath);
+    if (await _isProtected(absolute)) throw StateError(keyNeeded(absolute));
     final String path = await Locations.instance.resolveDatabase(nameOrPath);
     final Database db = await factory.openDatabase(path);
     return OpenedDatabase(

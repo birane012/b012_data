@@ -15,6 +15,13 @@ bool isPlainSqlite(List<int> head) {
   return true;
 }
 
+/// The message when a database that is not plain SQLite is opened without
+/// a key.
+String keyNeeded(String path) =>
+    'The database $path is encrypted (or is not an SQLite database): call '
+    'DataAccess.instance.useEncryptionKey(key) first. It is never opened '
+    'without its key, so that nothing can erase it.';
+
 /// [key] as an SQL string literal.
 String sqlLiteral(String key) => "'${key.replaceAll("'", "''")}'";
 

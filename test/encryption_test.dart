@@ -50,7 +50,20 @@ void main() {
     await da.useEncryptionKey('autre');
     await expectLater(da.countElementsOf<Account>(), throwsStateError);
     await da.useEncryptionKey(null);
-    await expectLater(da.countElementsOf<Account>(), throwsA(anything));
+    // Never opened without its key: on Android the system SQLite takes an
+    // encrypted file for a corrupt one and erases it (seen on the emulator).
+    await expectLater(
+      da.countElementsOf<Account>(),
+      throwsA(
+        isA<StateError>().having(
+          (StateError e) => e.message,
+          'message',
+          contains('useEncryptionKey'),
+        ),
+      ),
+    );
+    await da.useEncryptionKey('clé-1');
+    expect(await da.countElementsOf<Account>(), 1);
   });
 
   test(

@@ -30,6 +30,10 @@ abstract class FileStore {
 
   Future<bool> exists({String? fileName, String? path});
 
+  /// The first [count] bytes of the file (in [filesPath] only, never the
+  /// 2.0.3 folder), or `null` when it does not exist.
+  Future<Uint8List?> readHead(int count, {String? fileName, String? path});
+
   /// Writes [bytes] all at once. With an explicit [path] and `recursive`
   /// false, a missing parent folder throws, as in 2.0.3.
   Future<void> write(

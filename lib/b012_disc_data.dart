@@ -225,13 +225,14 @@ class DiscData {
     final String? validated = validatePath(path);
     await _locked(_lockKey(fileName, validated), () async {
       // Never through the shared 2.0.3 folder: only this application's file.
-      final Uint8List? current = await _store.read(
+      // Only its first bytes are read to know whether it is encrypted.
+      final Uint8List? head = await _store.readHead(
+        fileMagic.length,
         fileName: fileName,
         path: validated,
-        fallback: false,
       );
-      if (current == null) return;
-      if (!isEncryptedFile(current)) {
+      if (head == null) return;
+      if (!hasFileMagic(head)) {
         await _store.append(
           _bytesOf(data, dataType),
           fileName: fileName,
@@ -239,7 +240,13 @@ class DiscData {
         );
         return;
       }
-      final Uint8List clear = await _open(current);
+      final Uint8List clear = await _open(
+        (await _store.read(
+          fileName: fileName,
+          path: validated,
+          fallback: false,
+        ))!,
+      );
       await _store.write(
         await _seal(<int>[...clear, ..._bytesOf(data, dataType)], true),
         fileName: validated == null ? fileName : null,
@@ -265,7 +272,14 @@ class DiscData {
         'DataAccess.instance.useEncryptionKey first.',
       );
     }
-    return openFile(sealed, key);
+    try {
+      return await openFile(sealed, key);
+    } catch (_) {
+      throw StateError(
+        'This file was encrypted with another key (by another database, or '
+        'altered since): it cannot be read with the database open now.',
+      );
+    }
   }
 
   /// Encrypts the unencrypted files saved by name: those of the list kept

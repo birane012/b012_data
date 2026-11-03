@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 
 import 'package:sqflite_common/sqlite_api.dart' show Database;
@@ -401,7 +402,14 @@ class _WebLock {
 
   static Future<_WebLock> acquire(String name) async {
     final web.LockManager? locks = _locks();
-    if (locks == null) return _WebLock._(null, Future<void>.value());
+    if (locks == null) {
+      // Without Web Locks nothing keeps two tabs from writing over each
+      // other: refuse rather than risk it.
+      throw StateError(
+        'This browser page cannot lock the database (the Web Locks API needs '
+        'a secure page: https or localhost), so b012_data does not open it.',
+      );
+    }
     final Completer<bool> granted = Completer<bool>();
     final Completer<void> release = Completer<void>();
     final Future<void> released = locks
@@ -430,7 +438,10 @@ class _WebLock {
 
   static web.LockManager? _locks() {
     try {
-      return web.window.navigator.locks;
+      final web.Navigator navigator = web.window.navigator;
+      // Absent on pages that are not secure (plain http).
+      if (!(navigator as JSObject).has('locks')) return null;
+      return navigator.locks;
     } catch (_) {
       return null;
     }

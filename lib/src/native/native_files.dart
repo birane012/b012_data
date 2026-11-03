@@ -66,6 +66,22 @@ class NativeFileStore implements FileStore {
   }
 
   @override
+  Future<Uint8List?> readHead(
+    int count, {
+    String? fileName,
+    String? path,
+  }) async {
+    final File file = await _existing(fileName, path);
+    if (!await file.exists()) return null;
+    final RandomAccessFile raf = await file.open();
+    try {
+      return await raf.read(count);
+    } finally {
+      await raf.close();
+    }
+  }
+
+  @override
   Future<bool> exists({String? fileName, String? path}) async =>
       (await _existing(fileName, path, fallback: true)).exists();
 

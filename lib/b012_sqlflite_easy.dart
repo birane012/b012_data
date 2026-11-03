@@ -262,6 +262,12 @@ class DataAccess {
       _TxScope? scope;
       try {
         await executor.transaction((SqlExecutor tx) async {
+          // Read again inside the transaction: another opening may have
+          // applied this step meanwhile.
+          final Object? now = (await tx.select(
+            'PRAGMA user_version',
+          )).first['user_version'];
+          if (now is int && now >= step) return;
           scope = _TxScope(tx);
           await runZoned(
             () => migrations[step]!(),
@@ -742,14 +748,35 @@ class DataAccess {
     if (!await checkIfTableExists(table)) {
       await executor.execute(buildCreateTable(schema, table));
     } else if (autoAddColumns) {
-      final Set<String> existing = (await executor.select(
-        'PRAGMA table_info(${quoteAlways(table)})',
-      )).map((Map<String, Object?> row) => row['name']! as String).toSet();
+      final Set<String> existing =
+          (await executor.select('PRAGMA table_info(${quoteAlways(table)})'))
+              .map(
+                (Map<String, Object?> row) =>
+                    (row['name']! as String).toLowerCase(),
+              )
+              .toSet();
       for (final String column in schema.columns.keys) {
-        if (existing.contains(column)) continue;
+        // SQLite compares column names without case.
+        if (existing.contains(column.toLowerCase())) continue;
         await executor.execute(
           'ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN '
           '${columnDefinition(schema, column, forAlter: true)}',
+        );
+      }
+    }
+    for (final String name in indexNames(schema)) {
+      final List<Map<String, Object?>> owner = await executor.select(
+        "SELECT tbl_name FROM sqlite_master WHERE type = 'index' "
+        'AND name = ? COLLATE NOCASE',
+        <Object?>[name],
+      );
+      final String? other = owner.isEmpty
+          ? null
+          : owner.first['tbl_name'] as String?;
+      if (other != null && other.toLowerCase() != table.toLowerCase()) {
+        throw StateError(
+          'The index name "$name" is already used by the table "$other": index '
+          'names are shared by the whole database, choose another name.',
         );
       }
     }
@@ -1003,6 +1030,9 @@ class DataAccess {
     );
     final SqlExecutor executor = await _executor();
     await executor.transaction((SqlExecutor tx) async {
+      // Enforced foreign keys are checked at commit, once every table is
+      // empty, whatever the order of the tables.
+      await tx.execute('PRAGMA defer_foreign_keys = ON');
       for (final String table in tables) {
         await tx.execute('DELETE FROM ${quoteIdentifier(table)}');
       }

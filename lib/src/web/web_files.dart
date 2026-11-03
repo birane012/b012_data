@@ -33,7 +33,10 @@ class WebFileStore implements FileStore {
   @override
   void reset() {}
 
-  Future<web.IDBDatabase> _db() => _opening ??= _open();
+  Future<web.IDBDatabase> _db() => _opening ??= _open().catchError((Object e) {
+    _opening = null;
+    throw e;
+  });
 
   Future<web.IDBDatabase> _open() {
     final Completer<web.IDBDatabase> done = Completer<web.IDBDatabase>();
@@ -43,7 +46,15 @@ class WebFileStore implements FileStore {
       if (!db.objectStoreNames.contains(_store)) db.createObjectStore(_store);
     }).toJS;
     request.onsuccess = ((web.Event _) {
-      done.complete(request.result! as web.IDBDatabase);
+      final web.IDBDatabase db = request.result! as web.IDBDatabase;
+      // Closed by the browser (data cleared, upgrade elsewhere): reopen next
+      // time instead of keeping a dead connection.
+      db.onclose = ((web.Event _) => _opening = null).toJS;
+      db.onversionchange = ((web.Event _) {
+        db.close();
+        _opening = null;
+      }).toJS;
+      done.complete(db);
     }).toJS;
     request.onerror = ((web.Event _) {
       done.completeError(StateError('IndexedDB: ${request.error?.message}'));
@@ -116,6 +127,17 @@ class WebFileStore implements FileStore {
       )).toJS;
       return null;
     });
+  }
+
+  @override
+  Future<Uint8List?> readHead(
+    int count, {
+    String? fileName,
+    String? path,
+  }) async {
+    final Uint8List? bytes = await read(fileName: fileName, path: path);
+    if (bytes == null) return null;
+    return bytes.length <= count ? bytes : bytes.sublist(0, count);
   }
 
   @override

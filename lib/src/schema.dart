@@ -16,13 +16,20 @@ T? readGetter<T>(
 ) {
   try {
     return read(entity);
-  } on NoSuchMethodError {
+  } on NoSuchMethodError catch (e, s) {
+    // Absent getter: the error names it. In a browser, release builds
+    // shorten member names in error messages, so any NoSuchMethodError
+    // counts as absent there.
+    if (_inBrowser || e.toString().contains("'$name'")) return null;
+    onError(name, e, s);
     return null;
   } catch (e, s) {
     onError(name, e, s);
     return null;
   }
 }
+
+const bool _inBrowser = bool.fromEnvironment('dart.library.js_interop');
 
 /// SQLite type of a Dart type name.
 String sqlTypeFor(String dartType) {
@@ -205,6 +212,12 @@ String columnDefinition(
   if (check != null) line.write(' CHECK($check)');
   return line.toString();
 }
+
+/// Every index name [s] declares.
+Iterable<String> indexNames(EntitySchema s) => <String>[
+  ...?s.indexes?.keys,
+  ...?s.uniqueIndexes?.keys,
+];
 
 /// `CREATE [UNIQUE] INDEX IF NOT EXISTS` statements of [s] for [table].
 List<String> buildIndexes(EntitySchema s, String table) => <String>[

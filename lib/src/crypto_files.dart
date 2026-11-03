@@ -8,6 +8,15 @@ final List<int> fileMagic = ascii.encode('B012ENC1');
 
 final AesGcm _aes = AesGcm.with256bits();
 
+/// Whether [head] starts with the marker of a file encrypted by b012_data.
+bool hasFileMagic(List<int> head) {
+  if (head.length < fileMagic.length) return false;
+  for (int i = 0; i < fileMagic.length; i++) {
+    if (head[i] != fileMagic[i]) return false;
+  }
+  return true;
+}
+
 /// Whether [bytes] is a file encrypted by b012_data.
 bool isEncryptedFile(List<int> bytes) {
   if (bytes.length < fileMagic.length + 12 + 16) return false;

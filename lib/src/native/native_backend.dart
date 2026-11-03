@@ -1,7 +1,8 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart' show databaseFactorySqflitePlugin;
+import 'package:sqflite/sqflite.dart'
+    show databaseFactoryOrNull, databaseFactorySqflitePlugin;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../encryption.dart';
@@ -17,8 +18,11 @@ class NativeBackend implements Backend {
 
   static bool get _needsFfi => Platform.isWindows || Platform.isLinux;
 
-  DatabaseFactory get factory =>
-      _needsFfi ? databaseFactoryFfi : databaseFactorySqflitePlugin;
+  DatabaseFactory get factory => _needsFfi
+      ? databaseFactoryFfi
+      // A factory set globally (sqflite's databaseFactory) is honoured,
+      // as in 2.0.3.
+      : databaseFactoryOrNull ?? databaseFactorySqflitePlugin;
 
   Future<DatabaseFactory>? _encrypting;
 
@@ -115,7 +119,11 @@ class NativeBackend implements Backend {
   }
 
   @override
-  Future<void> encryptInPlace(String name, String key) async {
+  Future<void> encryptInPlace(
+    String name,
+    String key,
+    OpenOptions options,
+  ) async {
     final String path = await _absolutePath(name);
     if (!await _isPlain(path)) return;
     final DatabaseFactory ffi = await _encryptingFactory();
@@ -153,7 +161,8 @@ class NativeBackend implements Backend {
   Future<Database> openRaw(String path) => factory.openDatabase(path);
 
   @override
-  Future<void> delete(String path) => factory.deleteDatabase(path);
+  Future<void> delete(String path, OpenOptions options) =>
+      factory.deleteDatabase(path);
 
   @override
   Future<String?> readPointer() => Locations.instance.readPointer();

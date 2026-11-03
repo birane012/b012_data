@@ -100,7 +100,11 @@ class WebFileStore implements FileStore {
   }
 
   @override
-  Future<Uint8List?> read({String? fileName, String? path}) {
+  Future<Uint8List?> read({
+    String? fileName,
+    String? path,
+    bool fallback = true,
+  }) {
     final String key = _key(fileName, path);
     return _run<Uint8List?>('readonly', (
       web.IDBObjectStore store,
@@ -173,21 +177,7 @@ class WebFileStore implements FileStore {
   Future<bool> internetAvailable() async => web.window.navigator.onLine;
 
   @override
-  Future<List<String>> listNames() => _run<List<String>>('readonly', (
-    web.IDBObjectStore store,
-    void Function(List<String>) setResult,
-  ) {
-    final web.IDBRequest request = store.getAllKeys();
-    request.onsuccess = ((web.Event _) {
-      final List<String> names = <String>[];
-      for (final JSAny? key in (request.result! as JSArray<JSAny?>).toDart) {
-        final String k = (key! as JSString).toDart;
-        if (k.startsWith('$_files/')) names.add(k.substring(_files.length + 1));
-      }
-      setResult(names);
-    }).toJS;
-    return <String>[];
-  });
+  Future<String> get manifestPath async => '/meta/b012_files.json';
 }
 
 FileStore createFileStore() => WebFileStore();

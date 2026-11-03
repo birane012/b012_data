@@ -13,6 +13,7 @@ import 'dart:typed_data';
 import 'package:b012_data/b012_disc_data.dart';
 import 'package:b012_data/b012_sqlflite_easy.dart';
 import 'package:flutter/material.dart';
+import 'package:sqlite3/wasm.dart';
 import 'package:web/web.dart' as web;
 
 class Visit {
@@ -163,6 +164,25 @@ Future<Map<String, Object?>> all() async {
   return r;
 }
 
+/// Reads the database straight from IndexedDB, through a second SQLite.
+Future<Object?> independentCount(String db) async {
+  final WasmSqlite3 s = await WasmSqlite3.loadFromUrl(
+    Uri.parse('sqlite3mc.wasm'),
+  );
+  final IndexedDbFileSystem fs = await IndexedDbFileSystem.open(
+    dbName: 'b012_data',
+    vfsName: 'probe',
+  );
+  s.registerVirtualFileSystem(fs, makeDefault: false);
+  final CommonDatabase d = s.open('/$db.db', vfs: 'probe');
+  try {
+    return d.select('SELECT count(*) AS n FROM visit').first['n'];
+  } finally {
+    d.close();
+    await fs.close();
+  }
+}
+
 Future<Map<String, Object?>> run(Map<String, String> q) async {
   da.registerEntity<Visit>('visit');
   da.migrations = <int, Future<void> Function()>{
@@ -172,6 +192,28 @@ Future<Map<String, Object?>> run(Map<String, String> q) async {
   if (wasm != null) da.webSqliteWasmUri = Uri.parse(wasm);
   final String? key = q['key'];
   if (key != null) await da.useEncryptionKey(key);
+  if (q['step'] == 'wait') {
+    // Tries at once (the other tab holds the lock), waits, then retries
+    // until the lock is free, and counts what the other tab wrote meanwhile.
+    final Object? first = await attempt(
+      () => da.changeDB(q['db']!).then((_) => 'opened'),
+    );
+    await Future<void>.delayed(const Duration(seconds: 15));
+    for (int i = 0; i < 60; i++) {
+      try {
+        await da.changeDB(q['db']!);
+        break;
+      } on StateError {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+    }
+    return <String, Object?>{
+      'first attempt': first.toString().length > 60
+          ? first.toString().substring(0, 60)
+          : first,
+      'rows seen after waiting': await da.countElementsOf<Visit>(),
+    };
+  }
   await da.changeDB(q['db'] ?? 'web_check');
   if (q['step'] == 'encrypt') {
     await da.encryptDatabase(q['newkey']!);
@@ -193,6 +235,22 @@ Future<Map<String, Object?>> run(Map<String, String> q) async {
       }
       web.window.location.replace('about:blank');
       return <String, Object?>{'written': n};
+    case 'durable':
+      await da.insertObjet(
+        Visit(
+          'd${DateTime.now().microsecondsSinceEpoch}',
+          'S',
+          true,
+          DateTime(2026),
+        ),
+      );
+      final int seen = await da.countElementsOf<Visit>();
+      return <String, Object?>{
+        'rows seen by b012_data': seen,
+        'rows read straight from IndexedDB': await independentCount(
+          q['db'] ?? 'web_check',
+        ),
+      };
     case 'count':
       return <String, Object?>{'rows': await da.countElementsOf<Visit>()};
     case 'seed':

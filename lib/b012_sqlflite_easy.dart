@@ -121,23 +121,27 @@ class DataAccess {
   /// stored by b012_data: the application provides it at each start. Files
   /// saved by name with [DiscData] are encrypted too (AES-256-GCM).
   Future<void> useEncryptionKey(String? key) async {
-    await closeDB();
     _key = key;
-    _fileKeyCache = null;
+    await closeDB();
   }
 
   /// Encrypts in place, with [key], the unencrypted application database
-  /// and the files saved by name with [DiscData], then keeps using [key].
-  /// Safe to call again after an interruption: what is already encrypted is
-  /// kept, the rest is encrypted.
-  Future<void> encryptDatabase(String key) async {
+  /// and the files [DiscData] saved by name (it keeps their list), then
+  /// keeps using [key]. Files saved by name before 2.1 are not in that list:
+  /// pass their names in [alsoFiles]. Nothing else in the files folder is
+  /// touched (on Android it is shared with other plugins). Safe to call
+  /// again after an interruption: what is already encrypted is kept, the
+  /// rest is encrypted.
+  Future<void> encryptDatabase(
+    String key, {
+    Iterable<String> alsoFiles = const <String>[],
+  }) async {
     final String name = await _currentDatabaseName();
-    await closeDB();
-    await _backend.encryptInPlace(name, key);
     _key = key;
-    _fileKeyCache = null;
+    await closeDB();
+    await _backend.encryptInPlace(name, key, _options);
     DiscData.instance;
-    await EncryptionHooks.encryptExistingFiles?.call();
+    await EncryptionHooks.encryptExistingFiles?.call(alsoFiles);
   }
 
   /// Changes the key of the encrypted application database. Files keep
@@ -158,12 +162,18 @@ class DataAccess {
     _key = newKey;
   }
 
-  /// The key of the files: random, kept in the encrypted database.
+  /// The key of the files: random, kept in the encrypted database, loaded
+  /// (or created) when it opens — outside any transaction of the
+  /// application, so that a rollback can never lose it.
   Future<Uint8List?> _fileKey() async {
     if (_key == null) return null;
     final Uint8List? cached = _fileKeyCache;
     if (cached != null) return cached;
-    final SqlExecutor executor = await _executor();
+    await _open();
+    return _fileKeyCache;
+  }
+
+  static Future<Uint8List> _loadFileKey(SqlExecutor executor) async {
     await executor.execute(
       'CREATE TABLE IF NOT EXISTS b012_meta (k TEXT PRIMARY KEY, v BLOB)',
     );
@@ -171,7 +181,7 @@ class DataAccess {
       "SELECT v FROM b012_meta WHERE k = 'files'",
     );
     if (rows.isNotEmpty) {
-      return _fileKeyCache = Uint8List.fromList(rows.first['v']! as List<int>);
+      return Uint8List.fromList(rows.first['v']! as List<int>);
     }
     final Random random = Random.secure();
     final Uint8List key = Uint8List.fromList(
@@ -181,7 +191,7 @@ class DataAccess {
       "INSERT INTO b012_meta (k, v) VALUES ('files', ?)",
       <Object?>[key],
     );
-    return _fileKeyCache = key;
+    return key;
   }
 
   /// Forgets every registration (tests only).
@@ -207,11 +217,14 @@ class DataAccess {
     try {
       return await body();
     } catch (e, s) {
-      if (strict) rethrow;
+      if (strict || _scope != null) rethrow;
       _report(where, e, s);
       return fallback;
     }
   }
+
+  OpenOptions get _options =>
+      OpenOptions(key: _key, webWasmUri: webSqliteWasmUri);
 
   Future<OpenedDatabase> _open() {
     return _opening ??= _openApplicationDatabase().catchError((Object e) {
@@ -222,14 +235,12 @@ class DataAccess {
 
   Future<OpenedDatabase> _openApplicationDatabase({String? name}) async {
     final String dbName = name ?? await _currentDatabaseName();
-    final OpenedDatabase opened = await _backend.open(
-      dbName,
-      OpenOptions(key: _key, webWasmUri: webSqliteWasmUri),
-    );
+    final OpenedDatabase opened = await _backend.open(dbName, _options);
     try {
       if (enforceForeignKeys) {
         await opened.executor.execute('PRAGMA foreign_keys = ON');
       }
+      if (_key != null) _fileKeyCache = await _loadFileKey(opened.executor);
       await _runMigrations(opened.executor);
     } catch (_) {
       await opened.close();
@@ -248,20 +259,32 @@ class DataAccess {
     final List<int> steps =
         migrations.keys.where((int step) => step > current).toList()..sort();
     for (final int step in steps) {
-      await executor.transaction((SqlExecutor tx) async {
-        await runZoned(
-          () => migrations[step]!(),
-          zoneValues: <Object, Object>{_txKey: _TxScope(tx)},
-        );
-        await tx.execute('PRAGMA user_version = $step');
-      });
+      _TxScope? scope;
+      try {
+        await executor.transaction((SqlExecutor tx) async {
+          scope = _TxScope(tx);
+          await runZoned(
+            () => migrations[step]!(),
+            zoneValues: <Object, Object>{_txKey: scope!},
+          );
+          await tx.execute('PRAGMA user_version = $step');
+        });
+      } finally {
+        scope?.active = false;
+      }
     }
   }
 
   Future<String> _currentDatabaseName() async =>
       await _backend.readPointer() ?? 'sqlf_easy.db';
 
-  _TxScope? get _scope => Zone.current[_txKey] as _TxScope?;
+  /// The transaction the current code runs in — only while it is running:
+  /// work started inside a transaction and finished after it uses the
+  /// database normally.
+  _TxScope? get _scope {
+    final _TxScope? scope = Zone.current[_txKey] as _TxScope?;
+    return scope != null && scope.active ? scope : null;
+  }
 
   Future<SqlExecutor> _executor() async =>
       _scope?.executor ?? (await _open()).executor;
@@ -288,21 +311,26 @@ class DataAccess {
 
   /// Runs [action] in a transaction: everything or nothing. The [DataAccess]
   /// methods called inside [action] take part in it; a transaction started
-  /// inside a transaction joins it. If [action] throws, every change is
-  /// rolled back and the error is rethrown.
+  /// inside a transaction joins it. Inside a transaction a failing method
+  /// throws instead of returning `false` (even outside [strict] mode), so
+  /// that every change is rolled back; the error is rethrown.
   Future<R> transaction<R>(Future<R> Function() action) async {
     if (_scope != null) return action();
     final SqlExecutor executor = (await _open()).executor;
-    late _TxScope scope;
-    final R result = await executor.transaction((SqlExecutor tx) {
-      scope = _TxScope(tx);
-      return runZoned(
-        () => action(),
-        zoneValues: <Object, Object>{_txKey: scope},
-      );
-    });
-    _knownTables.addAll(scope.createdTables);
-    return result;
+    _TxScope? scope;
+    try {
+      final R result = await executor.transaction((SqlExecutor tx) {
+        scope = _TxScope(tx);
+        return runZoned(
+          () => action(),
+          zoneValues: <Object, Object>{_txKey: scope!},
+        );
+      });
+      _knownTables.addAll(scope!.createdTables);
+      return result;
+    } finally {
+      scope?.active = false;
+    }
   }
 
   /// Opens (or returns the already opened) application database.
@@ -331,7 +359,7 @@ class DataAccess {
   Future<Database> openDB(String dbPath) => _backend.openRaw(dbPath);
 
   /// Deletes the database file located at [dbPath].
-  Future<void> dropDB(String dbPath) => _backend.delete(dbPath);
+  Future<void> dropDB(String dbPath) => _backend.delete(dbPath, _options);
 
   /// Switches the application database to [newDBName].
   ///
@@ -367,6 +395,7 @@ class DataAccess {
     final Future<OpenedDatabase>? opening = _opening;
     _opening = null;
     _knownTables.clear();
+    _fileKeyCache = null;
     if (opening == null) return;
     try {
       await (await opening).close();
@@ -406,13 +435,29 @@ class DataAccess {
     if (object == null) return false;
     await createTableIfNotExists(object);
     return _guard('insertObjet', false, () async {
-      final int rowId = await _insertRow(
-        await _executor(),
-        _tableOf(object),
-        object,
-        orReplace: orReplace,
-      );
-      return rowId > 0;
+      final String table = _tableOf(object);
+      try {
+        return await _insertRow(
+              await _executor(),
+              table,
+              object,
+              orReplace: orReplace,
+            ) >
+            0;
+      } on DatabaseException catch (e) {
+        // A table dropped behind the package's back (raw SQL): recreate it,
+        // as 2.0.3 did by looking it up before every insert.
+        if (!e.isNoSuchTableError()) rethrow;
+        _knownTables.remove(table);
+        await createTableIfNotExists(object);
+        return await _insertRow(
+              await _executor(),
+              table,
+              object,
+              orReplace: orReplace,
+            ) >
+            0;
+      }
     });
   }
 
@@ -436,25 +481,42 @@ class DataAccess {
     await createTableIfNotExists(first);
 
     final SqlExecutor executor = await _executor();
-    return executor.transaction((SqlExecutor tx) async {
-      for (final Object? object in objectlist) {
-        if (object == null) continue;
-        try {
-          final int rowId = await _insertRow(
-            tx,
-            table,
-            object,
-            orReplace: orReplace,
-          );
-          if (rowId <= 0) return false;
-        } catch (e, s) {
-          if (strict) rethrow;
-          _report('insertObjetList', e, s);
-          return false;
+    for (int attempt = 0; ; attempt++) {
+      try {
+        return await executor.transaction((SqlExecutor tx) async {
+          for (final Object? object in objectlist) {
+            if (object == null) continue;
+            try {
+              final int rowId = await _insertRow(
+                tx,
+                table,
+                object,
+                orReplace: orReplace,
+              );
+              if (rowId <= 0) return false;
+            } catch (e, s) {
+              if (strict ||
+                  _scope != null ||
+                  (e is DatabaseException && e.isNoSuchTableError())) {
+                rethrow;
+              }
+              _report('insertObjetList', e, s);
+              return false;
+            }
+          }
+          return true;
+        });
+      } on DatabaseException catch (e, s) {
+        if (attempt == 0 && e.isNoSuchTableError()) {
+          _knownTables.remove(table);
+          await createTableIfNotExists(first);
+          continue;
         }
+        if (strict || _scope != null) rethrow;
+        _report('insertObjetList', e, s);
+        return false;
       }
-      return true;
-    });
+    }
   }
 
   /// Authenticates a user by matching [identifierColumnName]=[identifierValue]
@@ -822,16 +884,19 @@ class DataAccess {
     List<String> whereColumns,
     List<Object> values, {
     String whereMcop = 'AND',
-  }) => _guard('updateSomeColumnsOf', false, () async {
-    final String op = joinOperator(whereMcop);
-    final int affected = await (await _executor()).change(
-      'UPDATE ${quoteIdentifier(_tableFor<T>())} '
-      'SET ${preparedColumns(columnsToUpadate, ',')} '
-      'WHERE ${preparedColumns(whereColumns, op)}',
-      toSqlValues(values),
-    );
-    return affected > 0;
-  });
+  }) async {
+    final SqlExecutor executor = await _executor();
+    return _guard('updateSomeColumnsOf', false, () async {
+      final String op = joinOperator(whereMcop);
+      final int affected = await executor.change(
+        'UPDATE ${quoteIdentifier(_tableFor<T>())} '
+        'SET ${preparedColumns(columnsToUpadate, ',')} '
+        'WHERE ${preparedColumns(whereColumns, op)}',
+        toSqlValues(values),
+      );
+      return affected > 0;
+    });
+  }
 
   /// Updates every column of an entity instance except the primary key.
   ///
@@ -848,19 +913,22 @@ class DataAccess {
     List<String> whereColumns,
     List<Object> values, {
     String whereMcop = 'AND',
-  }) => _guard('updateWholeObject', false, () async {
-    final String op = joinOperator(whereMcop);
-    final Map<String, dynamic> row = _rowOf(newObject);
-    final String sets = row.keys
-        .map((String c) => '${quoteIdentifier(c)} = ?')
-        .join(', ');
-    final int affected = await (await _executor()).change(
-      'UPDATE ${quoteIdentifier(_tableOf(newObject))} SET $sets '
-      'WHERE ${preparedColumns(whereColumns, op)}',
-      <Object?>[...row.values.map(toSqlValue), ...toSqlValues(values)],
-    );
-    return affected > 0;
-  });
+  }) async {
+    final SqlExecutor executor = await _executor();
+    return _guard('updateWholeObject', false, () async {
+      final String op = joinOperator(whereMcop);
+      final Map<String, dynamic> row = _rowOf(newObject);
+      final String sets = row.keys
+          .map((String c) => '${quoteIdentifier(c)} = ?')
+          .join(', ');
+      final int affected = await executor.change(
+        'UPDATE ${quoteIdentifier(_tableOf(newObject))} SET $sets '
+        'WHERE ${preparedColumns(whereColumns, op)}',
+        <Object?>[...row.values.map(toSqlValue), ...toSqlValues(values)],
+      );
+      return affected > 0;
+    });
+  }
 
   /// Deletes every row of [T] matching [whereColumns] / [whereArgs].
   ///
@@ -1027,6 +1095,9 @@ class _TxScope {
   _TxScope(this.executor);
 
   final SqlExecutor executor;
+
+  /// False once the transaction has ended.
+  bool active = true;
 
   /// Tables created in this transaction, remembered once it commits.
   final Set<String> createdTables = <String>{};

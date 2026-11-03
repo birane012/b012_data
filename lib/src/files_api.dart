@@ -19,8 +19,14 @@ abstract class FileStore {
   /// Forgets cached folders (tests).
   void reset();
 
-  /// The bytes of the file, or `null` when it does not exist.
-  Future<Uint8List?> read({String? fileName, String? path});
+  /// The bytes of the file, or `null` when it does not exist. A name not
+  /// found in [filesPath] is looked for in the 2.0.3 folder when [fallback]
+  /// is true (reading only: nothing is ever written or deleted there).
+  Future<Uint8List?> read({
+    String? fileName,
+    String? path,
+    bool fallback = true,
+  });
 
   Future<bool> exists({String? fileName, String? path});
 
@@ -44,6 +50,7 @@ abstract class FileStore {
 
   Future<bool> internetAvailable();
 
-  /// Names (relative to [filesPath]) of the files saved by name.
-  Future<List<String>> listNames();
+  /// Where the list of the files saved by name is kept (a place b012_data
+  /// owns, never a folder shared with other code).
+  Future<String> get manifestPath;
 }

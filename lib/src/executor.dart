@@ -61,7 +61,7 @@ abstract class Backend {
   Future<Database> openRaw(String path);
 
   /// Deletes the database file at [path].
-  Future<void> delete(String path);
+  Future<void> delete(String path, OpenOptions options);
 
   /// The application database name remembered by `changeDB`, if any.
   Future<String?> readPointer();
@@ -71,5 +71,5 @@ abstract class Backend {
 
   /// Encrypts in place the unencrypted application database [name] with
   /// [key]. Does nothing when it does not exist or is already encrypted.
-  Future<void> encryptInPlace(String name, String key);
+  Future<void> encryptInPlace(String name, String key, OpenOptions options);
 }

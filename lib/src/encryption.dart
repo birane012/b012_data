@@ -50,6 +50,8 @@ class EncryptionHooks {
   /// encrypted, `null` otherwise.
   static Future<Uint8List?> Function()? fileKey;
 
-  /// Set by DiscData: encrypts the plaintext files saved by name.
-  static Future<void> Function()? encryptExistingFiles;
+  /// Set by DiscData: encrypts the plaintext files it saved by name (its
+  /// manifest), plus [alsoFiles].
+  static Future<void> Function(Iterable<String> alsoFiles)?
+  encryptExistingFiles;
 }

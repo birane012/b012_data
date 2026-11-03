@@ -48,6 +48,54 @@ class DiscData {
 
   final FileStore _store = createFileStore();
 
+  /// Writes, appends and deletes run one at a time per file, so concurrent
+  /// calls never lose each other's content.
+  final Map<String, Future<void>> _tails = <String, Future<void>>{};
+
+  /// Names of the files saved by name since 2.1 (loaded once).
+  Set<String>? _names;
+
+  Future<T> _locked<T>(String key, Future<T> Function() body) {
+    final Future<void> previous = _tails[key] ?? Future<void>.value();
+    final Completer<void> done = Completer<void>();
+    _tails[key] = done.future;
+    return previous.then((_) => body()).whenComplete(() {
+      done.complete();
+      if (identical(_tails[key], done.future)) _tails.remove(key);
+    });
+  }
+
+  static String _lockKey(String? fileName, String? path) =>
+      path ?? 'name:${fileName ?? ''}';
+
+  Future<Set<String>> _manifest() async {
+    final Set<String>? cached = _names;
+    if (cached != null) return cached;
+    final Uint8List? bytes = await _store.read(
+      path: await _store.manifestPath,
+      fallback: false,
+    );
+    final Object? decoded = bytes == null
+        ? null
+        : jsonDecode(utf8.decode(bytes));
+    return _names = decoded is List
+        ? decoded.map((Object? e) => e.toString()).toSet()
+        : <String>{};
+  }
+
+  /// Records (or forgets) [name] in the list of files saved by name.
+  Future<void> _record(String name, {required bool saved}) =>
+      _locked('manifest', () async {
+        final Set<String> names = await _manifest();
+        final bool changed = saved ? names.add(name) : names.remove(name);
+        if (!changed) return;
+        await _store.write(
+          utf8.encode(jsonEncode(names.toList()..sort())),
+          path: await _store.manifestPath,
+          recursive: true,
+        );
+      });
+
   /// Platform path separator (`'\'` on Windows, `'/'` elsewhere).
   late final String pathJoin = _store.separator;
 
@@ -74,7 +122,10 @@ class DiscData {
 
   /// Forgets the cached folders (tests only).
   @visibleForTesting
-  void debugResetPaths() => _store.reset();
+  void debugResetPaths() {
+    _store.reset();
+    _names = null;
+  }
 
   /// Returns `true` if the file identified by [fileName] (relative to
   /// [filesPath]) or by the absolute [path] exists.
@@ -136,12 +187,20 @@ class DiscData {
     if (pathJoin == r'\') fileName = fileName.replaceAll(':', '');
 
     final String? validated = validatePath(path);
-    await _store.write(
-      await _seal(_bytesOf(data, dataType), encrypt ?? validated == null),
-      fileName: validated == null ? fileName : null,
-      path: validated,
-      recursive: recursive,
+    final List<int> bytes = await _seal(
+      _bytesOf(data, dataType),
+      encrypt ?? validated == null,
     );
+    await _locked(
+      _lockKey(fileName, validated),
+      () => _store.write(
+        bytes,
+        fileName: validated == null ? fileName : null,
+        path: validated,
+        recursive: recursive,
+      ),
+    );
+    if (validated == null) await _record(fileName, saved: true);
     return fileName;
   }
 
@@ -164,26 +223,30 @@ class DiscData {
     if (data is String && data.isEmpty) return;
     if (data is List && data.isEmpty) return;
     final String? validated = validatePath(path);
-    final Uint8List? current = await _store.read(
-      fileName: fileName,
-      path: validated,
-    );
-    if (current == null) return;
-    if (!isEncryptedFile(current)) {
-      await _store.append(
-        _bytesOf(data, dataType),
+    await _locked(_lockKey(fileName, validated), () async {
+      // Never through the shared 2.0.3 folder: only this application's file.
+      final Uint8List? current = await _store.read(
         fileName: fileName,
         path: validated,
+        fallback: false,
       );
-      return;
-    }
-    final Uint8List clear = await _open(current);
-    await _store.write(
-      await _seal(<int>[...clear, ..._bytesOf(data, dataType)], true),
-      fileName: validated == null ? fileName : null,
-      path: validated,
-      recursive: true,
-    );
+      if (current == null) return;
+      if (!isEncryptedFile(current)) {
+        await _store.append(
+          _bytesOf(data, dataType),
+          fileName: fileName,
+          path: validated,
+        );
+        return;
+      }
+      final Uint8List clear = await _open(current);
+      await _store.write(
+        await _seal(<int>[...clear, ..._bytesOf(data, dataType)], true),
+        fileName: validated == null ? fileName : null,
+        path: validated,
+        recursive: true,
+      );
+    });
   }
 
   /// [bytes] encrypted when [wanted] and a key is in use.
@@ -205,14 +268,22 @@ class DiscData {
     return openFile(sealed, key);
   }
 
-  /// Encrypts the unencrypted files saved by name.
-  Future<void> _encryptExisting() async {
+  /// Encrypts the unencrypted files saved by name: those of the list kept
+  /// since 2.1, plus [alsoFiles]. Nothing else is touched.
+  Future<void> _encryptExisting(Iterable<String> alsoFiles) async {
     final Uint8List? key = await EncryptionHooks.fileKey?.call();
     if (key == null) return;
-    for (final String name in await _store.listNames()) {
-      final Uint8List? bytes = await _store.read(fileName: name);
-      if (bytes == null || isEncryptedFile(bytes)) continue;
-      await _store.write(await sealFile(bytes, key), fileName: name);
+    final Set<String> names = <String>{...await _manifest(), ...alsoFiles};
+    for (final String name in names) {
+      await _locked(_lockKey(name, null), () async {
+        final Uint8List? bytes = await _store.read(
+          fileName: name,
+          fallback: false,
+        );
+        if (bytes == null || isEncryptedFile(bytes)) return;
+        await _store.write(await sealFile(bytes, key), fileName: name);
+      });
+      await _record(name, saved: true);
     }
   }
 
@@ -282,8 +353,16 @@ class DiscData {
   /// Returns `true` if the file did not exist or was successfully deleted,
   /// and `false` if the deletion failed.
   Future<bool> deleteFile({String? fileName, String? path}) async {
+    final String? validated = validatePath(path);
     try {
-      return await _store.delete(fileName: fileName, path: validatePath(path));
+      final bool deleted = await _locked(
+        _lockKey(fileName, validated),
+        () => _store.delete(fileName: fileName, path: validated),
+      );
+      if (validated == null && fileName != null && deleted) {
+        await _record(fileName, saved: false);
+      }
+      return deleted;
     } on FileSystemException catch (e, s) {
       debugPrint('deleteFile failed: $e\n$s');
       return false;

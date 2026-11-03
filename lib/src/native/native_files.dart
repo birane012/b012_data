@@ -37,28 +37,37 @@ class NativeFileStore implements FileStore {
   }
 
   /// The file designated by an explicit [path], or by [fileName] in
-  /// [filesPath] — or, when it is not there, in the 2.0.3 folder.
-  Future<File> _existing(String? fileName, String? path) async {
+  /// [filesPath] — or, with [fallback], when it is not there, in the 2.0.3
+  /// folder (for reading only).
+  Future<File> _existing(
+    String? fileName,
+    String? path, {
+    bool fallback = false,
+  }) async {
     if (path != null) return File(path);
     final String name = fileName ?? '';
     final File primary = File(_inFolder(await filesPath, name));
-    if (name.isEmpty || await primary.exists()) return primary;
-    final String? fallback = await _locations.fallbackFilesDir;
-    if (fallback == null) return primary;
-    final File old = File(_inFolder(fallback, name));
+    if (!fallback || name.isEmpty || await primary.exists()) return primary;
+    final String? legacy = await _locations.fallbackFilesDir;
+    if (legacy == null) return primary;
+    final File old = File(_inFolder(legacy, name));
     return await old.exists() ? old : primary;
   }
 
   @override
-  Future<Uint8List?> read({String? fileName, String? path}) async {
-    final File file = await _existing(fileName, path);
+  Future<Uint8List?> read({
+    String? fileName,
+    String? path,
+    bool fallback = true,
+  }) async {
+    final File file = await _existing(fileName, path, fallback: fallback);
     if (!await file.exists()) return null;
     return file.readAsBytes();
   }
 
   @override
   Future<bool> exists({String? fileName, String? path}) async =>
-      (await _existing(fileName, path)).exists();
+      (await _existing(fileName, path, fallback: true)).exists();
 
   @override
   Future<void> write(
@@ -100,20 +109,13 @@ class NativeFileStore implements FileStore {
 
   @override
   Future<File?> file({String? fileName, String? path}) async {
-    final File file = await _existing(fileName, path);
+    final File file = await _existing(fileName, path, fallback: true);
     return await file.exists() ? file : null;
   }
 
   @override
-  Future<List<String>> listNames() async {
-    final Directory dir = Directory(await filesPath);
-    if (!await dir.exists()) return <String>[];
-    return <String>[
-      await for (final FileSystemEntity e in dir.list(recursive: true))
-        if (e is File && !e.path.endsWith('.b012tmp'))
-          p.relative(e.path, from: dir.path),
-    ];
-  }
+  Future<String> get manifestPath async =>
+      p.join(await _locations.ownDatabasesDir, 'b012_files.json');
 
   @override
   Future<bool> internetAvailable() async {

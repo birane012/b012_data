@@ -469,9 +469,11 @@ await DataAccess.instance.transaction(() async {
 ```
 
 Every `DataAccess` method called inside takes part in the transaction; a
-transaction started inside a transaction joins it. `insertObjetList` keeps
-its 2.0.3 behaviour (rows before a failing one are kept) unless you call it
-inside `transaction`.
+transaction started inside a transaction joins it. Inside a transaction a
+failing method throws (even outside strict mode) instead of returning
+`false`, so that everything is rolled back. Outside a transaction,
+`insertObjetList` keeps its 2.0.3 behaviour (rows before a failing one are
+kept).
 
 ### Replace, keys, indexes
 
@@ -553,8 +555,10 @@ parent.
   computer. 2.1 keeps a new installation's databases, `dbName` and files in
   the application support folder. A database left by 2.0.3 is found and kept
   where it is (its absolute path is recorded), so nothing disappears; an
-  application in that case keeps its 2.0.3 files folder too, and files saved
-  by 2.0.3 stay readable by name either way.
+  application in that case keeps its 2.0.3 files folder (and its 2.0.3
+  `databasesPath`) too. For a new installation, files saved by 2.0.3 in the
+  shared folder stay readable by name, but are never modified or deleted
+  through it. The decision is taken once and does not change afterwards.
 * `changeDB` creates the folder it needs.
 
 ### Files
@@ -577,7 +581,10 @@ dart run b012_data:setup_web   # puts sqlite3mc.wasm and sqlite3.wasm in web/
   and `DiscData` files live in IndexedDB; persistent storage is requested.
 * Every write is stored in IndexedDB before its future completes.
 * One tab at a time: a second tab opening the same database gets a clear
-  `StateError` instead of a copy that would overwrite the first.
+  `StateError` instead of a copy that would overwrite the first; the storage
+  is read only once the tab holds the database, so it always sees the other
+  tab's last writes. This needs the Web Locks API, available on `https` and
+  `localhost`.
 * Entities must be registered (`registerEntity`).
 * `DataAccess.db` and `openDB` (sqflite objects) are not available;
   `DiscData.getFile` returns `null` (there is no file system).
@@ -616,7 +623,12 @@ await DataAccess.instance.changeEncryptionKey(newKey);
   random key kept inside the encrypted database, so changing the database key
   rewrites no file. Files written at an explicit path (exports) stay plain
   unless `saveDataToDisc(..., encrypt: true)`. Older plaintext files remain
-  readable; `encryptDatabase` encrypts them too.
+  readable. `encryptDatabase` encrypts the files `DiscData` saved by name
+  since 2.1 (it keeps their list) and the names you pass in `alsoFiles`;
+  nothing else in the files folder is touched (on Android it is shared with
+  other plugins). A file is encrypted with the key of the database open when
+  it is saved: an application that switches between encrypted databases
+  with `changeDB` reads each file with the database that saved it.
 * On Android and iOS an encrypted database goes through the engine bundled
   by `package:sqlite3`, not the system SQLite.
 * **b012_data never stores the key**: your application provides it at each

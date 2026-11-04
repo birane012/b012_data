@@ -1,0 +1,31 @@
+name: device_check
+description: Checks b012_data inside a real application (flutter test integration_test).
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ">=3.12.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  b012_data:
+    path: ../..
+  path: ^1.9.0
+  path_provider: ^2.1.6
+  sqflite: ^2.4.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+# Encryption needs SQLite3MultipleCiphers, chosen by the application.
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlite3mc

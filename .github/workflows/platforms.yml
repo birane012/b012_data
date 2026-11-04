@@ -1,0 +1,113 @@
+# The unit tests on the hosts where they mean something (Linux and Windows
+# open their bases through sqflite_common_ffi, as a real application does),
+# and tool/device_check inside a real application on Linux, macOS and an iOS
+# simulator, where the sqflite plugin and the real folders are used.
+name: platforms
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.3
+
+jobs:
+  windows:
+    name: Windows (unit tests)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter test
+
+  linux:
+    name: Linux (unit tests and desktop application)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze lib test bin example
+      - run: flutter test
+      - name: Desktop toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev xvfb
+      - name: Device check
+        working-directory: tool/device_check
+        run: |
+          flutter create --platforms=linux --org dev.b012 --project-name device_check .
+          rm -rf test
+          xvfb-run -a flutter test integration_test -d linux
+
+  macos:
+    name: macOS (desktop application)
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Device check
+        working-directory: tool/device_check
+        run: |
+          flutter create --platforms=macos --org dev.b012 --project-name device_check .
+          rm -rf test
+          flutter test integration_test -d macos
+
+  ios:
+    name: iOS (simulator)
+    runs-on: macos-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Boot an iPhone simulator
+        id: simulator
+        run: |
+          udid=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime in sorted(devices, reverse=True):
+              if "iOS" not in runtime:
+                  continue
+              for device in devices[runtime]:
+                  if device["name"].startswith("iPhone"):
+                      print(device["udid"])
+                      sys.exit()
+          ')
+          test -n "$udid"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Device check
+        working-directory: tool/device_check
+        run: |
+          flutter create --platforms=ios --org dev.b012 --project-name device_check .
+          rm -rf test
+          flutter test integration_test -d "${{ steps.simulator.outputs.udid }}"

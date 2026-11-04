@@ -50,7 +50,7 @@ jobs:
       - name: Desktop toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev xvfb
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev xvfb
       - name: Device check
         working-directory: tool/device_check
         run: |
@@ -90,20 +90,28 @@ jobs:
       - name: Boot an iPhone simulator
         id: simulator
         run: |
-          udid=$(xcrun simctl list devices available --json | python3 -c '
-          import json, sys
+          xcodebuild -version
+          xcrun simctl list runtimes
+          # An iPhone of the runtime the default Xcode builds for: a newer
+          # runtime installed next to it would have no build destination.
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          echo "iphonesimulator SDK: $sdk"
+          udid=$(xcrun simctl list devices available --json | SDK_MAJOR="${sdk%%.*}" python3 -c '
+          import json, os, sys
+          wanted = ".iOS-" + os.environ["SDK_MAJOR"] + "-"
           devices = json.load(sys.stdin)["devices"]
-          for runtime in sorted(devices, reverse=True):
-              if "iOS" not in runtime:
-                  continue
+          runtimes = sorted((r for r in devices if ".iOS-" in r), reverse=True)
+          for runtime in sorted(runtimes, key=lambda r: wanted not in r):
               for device in devices[runtime]:
                   if device["name"].startswith("iPhone"):
                       print(device["udid"])
+                      print(runtime, device["name"], file=sys.stderr)
                       sys.exit()
           ')
           test -n "$udid"
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
+          flutter devices
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
       - name: Device check
         working-directory: tool/device_check

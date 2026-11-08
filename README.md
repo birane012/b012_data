@@ -144,34 +144,38 @@ class Person {
 
 /// Full CRUD walk-through driven exclusively through `DataAccess.instance`.
 /// Every call below is the high-level equivalent of a Spring Data JPA
-/// repository method — no SQL string is ever written by hand.
+/// repository method: at most you write a WHERE condition, whose values are
+/// passed in `whereArgs` and bound to its `?` placeholders.
 Future<void> runSqliteDemo() async {
   // Inspect the CREATE TABLE statement generated for the Person entity.
   debugPrint('${DataAccess.instance.showCreateTable(Person())}\n\n');
 
   // Does the Person table already exist in the database?
-  final bool personTableExists =
-      await DataAccess.instance.checkIfEntityTableExists<Person>();
+  final bool personTableExists = await DataAccess.instance
+      .checkIfEntityTableExists<Person>();
   debugPrint('Person table exists? $personTableExists\n');
 
   // CREATE — insert a single Person row.
   final bool inserted = await DataAccess.instance.insertObjet(
-    Person(newKey, 'KEBE', 'Birane', true, DateTime(2000, 8, 5)),
+    Person(newKey, 'Birane', 'KEBE', true, DateTime(2000, 8, 5)),
   );
   debugPrint('Single insert ok? $inserted\n');
 
-  // CREATE (bulk) — insert several Persons inside a single transaction.
-  final bool personsListInserted =
-      await DataAccess.instance.insertObjetList(<Person>[
-    Person(newKey, 'Mbaye', 'Aliou', true, DateTime(1999, 5, 1)),
-    Person(newKey, 'Cisse', 'Fatou', false, DateTime(2000, 7, 9)),
-  ]);
+  // CREATE (bulk) — insert several Persons in one call. If a row fails, the
+  // rows before it are kept: call it inside `transaction` for all or nothing.
+  final bool personsListInserted = await DataAccess.instance
+      .insertObjetList(<Person>[
+        Person(newKey, 'Aliou', 'Mbaye', true, DateTime(1999, 5, 1)),
+        Person(newKey, 'Fatou', 'Cisse', false, DateTime(2000, 7, 9)),
+      ]);
   debugPrint('Bulk insert ok? $personsListInserted\n');
 
-  // READ — fetch a single row matching an SQL predicate.
+  // READ — fetch a single row. Each `?` is bound to the matching value of
+  // `whereArgs`: a value is never pasted into the SQL text.
   final Person? birane = await DataAccess.instance.get<Person>(
     Person(),
-    "firstName = 'Birane' AND lastName = 'KEBE'",
+    'firstName = ? AND lastName = ?',
+    <Object>['Birane', 'KEBE'],
   );
   debugPrint('Found Birane? ${birane != null}\n');
 
@@ -181,21 +185,26 @@ Future<void> runSqliteDemo() async {
   );
   debugPrint('Total persons: ${everyone?.length ?? 0}\n');
 
-  // READ — fetch rows matching a predicate. Booleans are automatically
-  // converted to 0/1 for SQLite, so `sex = true` is equivalent to `sex = 1`.
+  // READ — fetch the rows matching a condition. Booleans and dates are bound
+  // the way b012_data stores them (`true` is stored as 1).
   final List<Person>? men = await DataAccess.instance.getAllSorted<Person>(
     Person(),
-    'sex = true',
+    'sex = ?',
+    <Object>[true],
   );
   debugPrint('Men: ${men?.length ?? 0}\n');
 
   // READ (projection) — pull a single column across the whole table.
-  final List<String> firstNames =
-      await DataAccess.instance.getAColumnFrom<String, Person>('firstName');
+  final List<String> firstNames = await DataAccess.instance
+      .getAColumnFrom<String, Person>('firstName');
   debugPrint('First names: $firstNames\n');
 
   final List<String> womenFirstNames = await DataAccess.instance
-      .getAColumnFrom<String, Person>('firstName', afterWhere: 'sex = false');
+      .getAColumnFrom<String, Person>(
+        'firstName',
+        afterWhere: 'sex = ?',
+        whereArgs: <Object>[false],
+      );
   debugPrint('Women first names: $womenFirstNames\n');
 
   // READ (projection) — pull several columns at once.
@@ -203,11 +212,12 @@ Future<void> runSqliteDemo() async {
       .getSomeColumnsFrom<Person>('firstName, lastName');
   debugPrint('First + last names: $nameRows\n');
 
-  final List<Map<String, Object?>> womenNameRows =
-      await DataAccess.instance.getSomeColumnsFrom<Person>(
-    'firstName, lastName',
-    afterWhere: 'sex = 0',
-  );
+  final List<Map<String, Object?>> womenNameRows = await DataAccess.instance
+      .getSomeColumnsFrom<Person>(
+        'firstName, lastName',
+        afterWhere: 'sex = ?',
+        whereArgs: <Object>[false],
+      );
   debugPrint('Women first + last names: $womenNameRows\n');
 
   // UPDATE — values follow the order `columnsToUpadate` + `whereColumns`.
@@ -220,16 +230,18 @@ Future<void> runSqliteDemo() async {
   );
   debugPrint('Update ok? $updated\n');
 
-  // DELETE — remove every row matching the predicate.
+  // DELETE — remove every row matching the condition.
   final bool deletedFatou = await DataAccess.instance.deleteObjet<Person>(
-    "firstName = 'Fatou'",
+    'firstName = ?',
+    <Object>['Fatou'],
   );
   debugPrint('Fatou deleted? $deletedFatou\n');
 
   // COUNT — total rows and filtered rows.
   final int total = await DataAccess.instance.countElementsOf<Person>();
   final int males = await DataAccess.instance.countElementsOf<Person>(
-    afterWhere: 'sex = true',
+    afterWhere: 'sex = ?',
+    whereArgs: <Object>[true],
   );
   debugPrint('Total rows: $total, male rows: $males\n');
 
@@ -247,9 +259,9 @@ Future<void> runSqliteDemo() async {
    and `getAColumnFrom`, which catch the error and only log it via
    `debugPrint` (and `onError`) — unless `strict` is set. Wrap the other
    methods in `try` / `catch` if you are not sure the table already exists.
-3. `afterWhere` texts are inserted as is: never build them from user input,
+2. `afterWhere` texts are inserted as is: never build them from user input,
    use `?` and `whereArgs` (see [Security](#security-bound-values)).
-2. `insertObjet` and `insertObjetList` internally convert your entity map
+3. `insertObjet` and `insertObjetList` internally convert your entity map
    using `mapToUse(entity.toMap())`. Call `mapToUse(entity.toMap(), forDB: false)`
    yourself when you want a plain Dart map (e.g. for JSON serialization or
    display) instead of an SQLite-ready one.

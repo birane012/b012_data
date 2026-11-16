@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
+
+import 'package:meta/meta.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
 import 'src/backend.dart';
-import 'package:b012_data/b012_disc_data.dart';
+import 'src/hooks.dart' if (dart.library.ui) 'src/flutter_hooks.dart';
 
 import 'src/column_type.dart';
 import 'src/encryption.dart';
@@ -37,6 +39,9 @@ typedef B012ErrorHandler = void Function(Object error, StackTrace stack);
 /// the values in `whereArgs` instead.
 ///
 /// See the package README for a complete usage example.
+/// Whether the code runs in a browser (as Flutter's `kIsWeb`).
+const bool _kIsWeb = bool.fromEnvironment('dart.library.js_interop');
+
 class DataAccess {
   DataAccess._internal() {
     EncryptionHooks.fileKey = _fileKey;
@@ -53,7 +58,7 @@ class DataAccess {
   bool strict = false;
 
   /// Receives every error turned into `false`, `null` or `[]` outside strict
-  /// mode (the error is also printed with [debugPrint], as before).
+  /// mode (the error is also printed with `debugPrint` under Flutter, `print` otherwise, as before).
   B012ErrorHandler? onError;
 
   Future<OpenedDatabase>? _opening;
@@ -119,14 +124,14 @@ class DataAccess {
   /// On Android and iOS an encrypted database goes through the SQLite
   /// bundled by `package:sqlite3`, not the system one. The key is never
   /// stored by b012_data: the application provides it at each start. Files
-  /// saved by name with [DiscData] are encrypted too (AES-256-GCM).
+  /// saved by name with `DiscData` are encrypted too (AES-256-GCM).
   Future<void> useEncryptionKey(String? key) async {
     _key = key;
     await closeDB();
   }
 
   /// Encrypts in place, with [key], the unencrypted application database
-  /// and the files [DiscData] saved by name (it keeps their list), then
+  /// and the files `DiscData` saved by name (it keeps their list), then
   /// keeps using [key]. Files saved by name before 2.1 are not in that list:
   /// pass their names in [alsoFiles]. Nothing else in the files folder is
   /// touched (on Android it is shared with other plugins). Safe to call
@@ -140,7 +145,7 @@ class DataAccess {
     _key = key;
     await closeDB();
     await _backend.encryptInPlace(name, key, _options);
-    DiscData.instance;
+    b012PrepareFiles();
     await EncryptionHooks.encryptExistingFiles?.call(alsoFiles);
   }
 
@@ -203,7 +208,7 @@ class DataAccess {
   int get debugOpenCount => _openCount;
 
   void _report(String where, Object error, StackTrace stack) {
-    debugPrint('$where failed: $error\n$stack');
+    b012Trace('$where failed: $error\n$stack');
     onError?.call(error, stack);
   }
 
@@ -304,7 +309,7 @@ class DataAccess {
   /// shorten class names: a table named after its class would change with an
   /// update of the application.
   String _unregistered(Type type) {
-    if (kIsWeb) {
+    if (_kIsWeb) {
       throw StateError(
         'In a browser every entity must be registered, for instance '
         "DataAccess.instance.registerEntity<Person>('person'): release builds "
@@ -377,7 +382,7 @@ class DataAccess {
   /// so that subsequent calls to [db] return the same database.
   Future<void> changeDB(String? newDBName) async {
     if (newDBName == null || newDBName.isEmpty) {
-      debugPrint('changeDB called with a null or empty name.');
+      b012Trace('changeDB called with a null or empty name.');
       return;
     }
 
@@ -393,7 +398,7 @@ class DataAccess {
     );
     _opening = opening;
     await opening;
-    debugPrint('Database successfully changed to $correctedName');
+    b012Trace('Database successfully changed to $correctedName');
   }
 
   /// Closes the current application database (if any).
@@ -626,7 +631,7 @@ class DataAccess {
   /// table [T], optionally filtered by [afterWhere] and [whereArgs].
   ///
   /// Returns an empty list on error (outside [strict] mode); the error is
-  /// printed with [debugPrint] and passed to [onError].
+  /// printed with `debugPrint` under Flutter, `print` otherwise, and passed to [onError].
   Future<List<C>> getAColumnFrom<C, T>(
     String columnName, {
     String? afterWhere,

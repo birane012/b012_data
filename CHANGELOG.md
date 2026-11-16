@@ -1,3 +1,16 @@
+## Unreleased
+
+* **Flutter-free entry.** `package:b012_data/b012_data_dart.dart` gives the same
+  `DataAccess` API to servers, command-line tools and plain Dart tests: the
+  engine is `sqflite_common_ffi` over the SQLite bundled by `package:sqlite3`
+  (SQLite3MultipleCiphers for encryption, same rules as in an application),
+  the databases sit in the folder given to `setDatabasesDirectory` (the
+  current directory by default). `DiscData` stays Flutter-only.
+  `b012_sqlflite_easy.dart` no longer imports Flutter itself: the engine and
+  the two Flutter hooks (`debugPrint`, `DiscData`) are chosen by conditional
+  imports, so a Flutter application sees no change. The Dart engine mirrors
+  the native one's desktop path; sharing that code is left for later.
+
 ## 2.1.0
 
 Everything of 2.0.3 keeps working unchanged; everything new is opt-in. See
